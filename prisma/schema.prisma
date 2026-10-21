@@ -1,0 +1,383 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum WorkspaceRole {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum TaskStatus {
+  BACKLOG
+  TODO
+  IN_PROGRESS
+  IN_REVIEW
+  DONE
+}
+
+model User {
+  id            String    @id @default(uuid())
+  email         String    @unique
+  passwordHash  String
+  name          String
+  avatarUrl     String?
+  emailVerified Boolean   @default(false)
+  emailVerifiedAt DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  workspaceMemberships WorkspaceMember[]
+  ownedWorkspaces      Workspace[]             @relation("WorkspaceOwner")
+  teamMemberships      TeamMember[]
+  projectMemberships   ProjectMember[]
+  ledProjects          Project[]               @relation("ProjectLead")
+  reportedTasks        Task[]                  @relation("TaskReporter")
+  assignedTasks        TaskAssignee[]
+  comments             Comment[]
+  activityLogs         ActivityLog[]           @relation("ActorActivity")
+  notifications        Notification[]          @relation("UserNotifications")
+  sentNotifications    Notification[]          @relation("ActorNotifications")
+  attachments          Attachment[]
+  sentInvitations      WorkspaceInvitation[]   @relation("UserSentInvitations")
+}
+
+model Workspace {
+  id          String    @id @default(uuid())
+  name        String
+  slug        String    @unique
+  description String?
+  ownerId     String
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  owner       User                  @relation("WorkspaceOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  members     WorkspaceMember[]
+  teams       Team[]
+  projects    Project[]
+  labels      Label[]
+  activity    ActivityLog[]
+  invitations WorkspaceInvitation[]
+}
+
+model WorkspaceMember {
+  id          String        @id @default(uuid())
+  workspaceId String
+  userId      String
+  role        WorkspaceRole @default(MEMBER)
+  joinedAt    DateTime      @default(now())
+
+  workspace   Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+  @@index([userId])
+  @@index([workspaceId])
+}
+
+model WorkspaceInvitation {
+  id          String        @id @default(uuid())
+  workspaceId String
+  email       String
+  role        WorkspaceRole @default(MEMBER)
+  token       String        @unique
+  expiresAt   DateTime
+  inviterId   String
+  createdAt   DateTime      @default(now())
+
+  workspace   Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  inviter     User          @relation("UserSentInvitations", fields: [inviterId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, email])
+  @@index([token])
+  @@index([workspaceId])
+}
+
+model Team {
+  id          String       @id @default(uuid())
+  workspaceId String
+  name        String
+  description String?
+  color       String?      @default("#6366f1")
+  createdAt   DateTime     @default(now())
+
+  workspace   Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  members     TeamMember[]
+  projects    Project[]
+
+  @@index([workspaceId])
+}
+
+model TeamMember {
+  id       String   @id @default(uuid())
+  teamId   String
+  userId   String
+  role     String   @default("MEMBER")
+  joinedAt DateTime @default(now())
+
+  team     Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([teamId, userId])
+  @@index([userId])
+  @@index([teamId])
+}
+
+model Project {
+  id          String          @id @default(uuid())
+  workspaceId String
+  teamId      String?
+  name        String
+  key         String
+  description String?
+  status      String          @default("ACTIVE")
+  priority    TaskPriority    @default(MEDIUM)
+  leadId      String?
+  icon        String?         @default("kanban")
+  color       String?         @default("#3b82f6")
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  workspace   Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  team        Team?           @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  lead        User?           @relation("ProjectLead", fields: [leadId], references: [id], onDelete: SetNull)
+  members     ProjectMember[]
+  columns     BoardColumn[]
+  tasks       Task[]
+  activities  ActivityLog[]
+
+  @@unique([workspaceId, key])
+  @@index([workspaceId])
+}
+
+model ProjectMember {
+  id        String   @id @default(uuid())
+  projectId String
+  userId    String
+  role      String   @default("CONTRIBUTOR")
+  joinedAt  DateTime @default(now())
+
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, userId])
+  @@index([userId])
+  @@index([projectId])
+}
+
+model BoardColumn {
+  id        String   @id @default(uuid())
+  projectId String
+  name      String
+  position  Float    @default(0)
+  wipLimit  Int?     @default(0)
+  color     String?  @default("#64748b")
+  createdAt DateTime @default(now())
+
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  tasks     Task[]
+
+  @@index([projectId, position])
+}
+
+model Task {
+  id          String        @id @default(uuid())
+  projectId   String
+  columnId    String
+  taskKey     String
+  title       String
+  description String?
+  priority    TaskPriority  @default(MEDIUM)
+  status      TaskStatus    @default(TODO)
+  position    Float         @default(0)
+  dueDate     DateTime?
+  startDate   DateTime?
+  points      Int?          @default(1)
+  reporterId  String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  project     Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  column      BoardColumn   @relation(fields: [columnId], references: [id], onDelete: Cascade)
+  reporter    User?         @relation("TaskReporter", fields: [reporterId], references: [id], onDelete: SetNull)
+  assignees   TaskAssignee[]
+  labels      TaskLabel[]
+  checklists  Checklist[]
+  attachments Attachment[]
+  comments    Comment[]
+  activities  ActivityLog[]
+
+  @@unique([projectId, taskKey])
+  @@index([projectId, columnId])
+  @@index([columnId, position])
+  @@index([reporterId])
+  @@index([dueDate])
+  @@index([status])
+}
+
+model TaskSequence {
+  projectId   String  @id
+  current     Int     @default(0)
+
+  @@unique([projectId])
+  @@index([projectId])
+}
+
+model TaskAssignee {
+  id         String   @id @default(uuid())
+  taskId     String
+  userId     String
+  assignedAt DateTime @default(now())
+
+  task       Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, userId])
+  @@index([userId])
+  @@index([taskId])
+}
+
+model Label {
+  id          String      @id @default(uuid())
+  workspaceId String
+  name        String
+  color       String      @default("#3b82f6")
+
+  workspace   Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  tasks       TaskLabel[]
+
+  @@unique([workspaceId, name])
+  @@index([workspaceId])
+}
+
+model TaskLabel {
+  id      String @id @default(uuid())
+  taskId  String
+  labelId String
+
+  task    Task   @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  label   Label  @relation(fields: [labelId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, labelId])
+  @@index([taskId])
+  @@index([labelId])
+}
+
+model Checklist {
+  id        String          @id @default(uuid())
+  taskId    String
+  title     String          @default("Checklist")
+  position  Float           @default(0)
+
+  task      Task            @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  items     ChecklistItem[]
+
+  @@index([taskId])
+}
+
+model ChecklistItem {
+  id          String    @id @default(uuid())
+  checklistId String
+  content     String
+  isCompleted Boolean   @default(false)
+  position    Float     @default(0)
+
+  checklist   Checklist @relation(fields: [checklistId], references: [id], onDelete: Cascade)
+
+  @@index([checklistId, position])
+}
+
+model Attachment {
+  id         String   @id @default(uuid())
+  taskId     String
+  name       String
+  fileUrl    String
+  fileType   String
+  fileSize   Int
+  uploaderId String
+  createdAt  DateTime @default(now())
+
+  task       Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  uploader   User     @relation(fields: [uploaderId], references: [id], onDelete: Cascade)
+
+  @@index([taskId])
+}
+
+model Comment {
+  id        String   @id @default(uuid())
+  taskId    String
+  authorId  String
+  content   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  author    User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@index([taskId, createdAt])
+}
+
+model ActivityLog {
+  id          String    @id @default(uuid())
+  workspaceId String
+  projectId   String
+  taskId      String?
+  actorId     String
+  action      String
+  details     String?
+  createdAt   DateTime  @default(now())
+
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project     Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  task        Task?     @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  actor       User      @relation("ActorActivity", fields: [actorId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt])
+  @@index([projectId, createdAt])
+  @@index([taskId])
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  actorId   String
+  type      String
+  title     String
+  message   String
+  link      String?
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user      User     @relation("UserNotifications", fields: [userId], references: [id], onDelete: Cascade)
+  actor     User     @relation("ActorNotifications", fields: [actorId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead, createdAt])
+}
+
+model VerificationToken {
+  id        String   @id @default(uuid())
+  email     String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@unique([email, token])
+  @@index([email])
+  @@index([token])
+}
