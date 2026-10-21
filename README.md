@@ -220,9 +220,9 @@ EMAIL_FROM="SyncBoard <onboarding@resend.dev>"
 # -----------------------------------------------------------------------------
 # File Storage for Attachments (Images up to 10MB)
 # -----------------------------------------------------------------------------
-NEXT_PUBLIC_SUPABASE_URL=""
-NEXT_PUBLIC_SUPABASE_ANON_KEY=""
-SUPABASE_SERVICE_ROLE_KEY=""
+NEXT_PUBLIC_SUPABASE_URL="https://your-project-id.supabase.co"
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY="your-publishable-key"
+SUPABASE_SECRET_KEY="your-secret-key"
 SUPABASE_STORAGE_BUCKET="attachments"
 ```
 
