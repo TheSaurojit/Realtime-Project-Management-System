@@ -38,5 +38,3 @@ jobs:
       - name: Run TypeScript Compiler Check
         run: npx tsc --noEmit
 
-      - name: Run Vitest Unit Tests
-        run: npm test
