@@ -129,6 +129,17 @@ flowchart TD
 | **Email Service** | Resend API (`resend`) with automated console simulator fallback |
 | **Testing** | Vitest 3.2.7 |
 
+### 💡 Architectural Decisions & Scope Notes (Intentional Design Choices)
+
+The following stack pieces were evaluated and **intentionally omitted or streamlined** in favor of lightweight, tailored alternatives:
+
+| Stack Piece | Status / Choice | Architectural Rationale & Implementation Detail |
+| :--- | :---: | :--- |
+| **Zod / React Hook Form** | *Intentionally Skipped* | **Native Controlled State & Strict Server Route Validation**: Modal forms (task create, invite flows, column limits, member roles) use native React controlled inputs (`useState`, `useTransition`) combined with server-side validation guards and Prisma/TypeScript schema types. This avoids third-party schema duplication and runtime bundle overhead. |
+| **Stripe Billing** | *Intentionally Skipped* | **Focus on Internal / Enterprise Collaboration**: SyncBoard is built as an organization workspace management tool centered on team collaboration, squad delegation, 3-tier RBAC, and tenant security rather than a public consumer SaaS with paywalls, trial subscriptions, or metered billing. |
+| **Recharts Dashboard** | *Intentionally Skipped* | **High-Performance Native Tailwind UI Metrics**: Project health, task completion ratios, and column WIP limits are visualized directly through native Tailwind CSS progress bars, priority badges, checklist counters, and interactive views (Kanban, Tabular List, and Monthly Calendar) without loading heavy D3/SVG chart bundles (~500KB+). |
+| **shadcn/ui CLI** | *Custom Alternative* | **Zero-Dependency Tailwind v4 UI Primitives**: Instead of bootstrapping via the shadcn/ui CLI and pulling in Radix UI wrappers, SyncBoard implements bespoke, accessible UI components in `components/ui/` (`button.tsx`, `badge.tsx`, `avatar.tsx`, `modal.tsx`) styled with Tailwind CSS v4, `clsx`, and `tailwind-merge`. |
+
 ---
 
 ## 📋 Prerequisites
@@ -221,14 +232,14 @@ EMAIL_FROM="SyncBoard <onboarding@resend.dev>"
 # File Storage for Attachments (Images up to 10MB)
 # -----------------------------------------------------------------------------
 NEXT_PUBLIC_SUPABASE_URL="https://your-project-id.supabase.co"
-NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY="your-publishable-key"
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY="your-anon-or-publishable-key"
 SUPABASE_SECRET_KEY="your-secret-key"
 SUPABASE_STORAGE_BUCKET="attachments"
 ```
 
 > [!NOTE]
 > **Why Port 5433?**
-> The Docker container maps host port `5433` to container port `5432` (`5433:5432`). This prevents port collisions with any local PostgreSQL instance already running on your machine's default `5432` port.
+> The Docker container binds host loopback port `127.0.0.1:5433` to container port `5432` (`127.0.0.1:5433:5432`). This prevents port collisions with any local PostgreSQL instance already running on your machine's default `5432` port and ensures the database is only reachable from localhost (not exposed externally).
 
 ### 4. Start PostgreSQL with Docker
 
@@ -243,7 +254,7 @@ Verify that the container is healthy:
 ```bash
 docker ps
 ```
-You should see `syncboard_postgres` running on `0.0.0.0:5433->5432/tcp`.
+You should see `syncboard_postgres` running on `127.0.0.1:5433->5432/tcp`.
 
 ### 5. Synchronize Schema and Seed Demo Data
 
@@ -423,11 +434,11 @@ flowchart TD
 - To enable image uploads for tasks:
   1. Create a free project at [supabase.com](https://supabase.com).
   2. Create a public storage bucket named **`attachments`**.
-  3. In Supabase Project Settings → API, copy your Project URL, Anon Key, and Service Role Key into `.env`:
+  3. In Supabase Project Settings → API, copy your Project URL, Publishable Key, and Secret Key into `.env`:
      ```env
      NEXT_PUBLIC_SUPABASE_URL="https://your-project-id.supabase.co"
-     NEXT_PUBLIC_SUPABASE_ANON_KEY="your-anon-key"
-     SUPABASE_SERVICE_ROLE_KEY="your-service-role-key"
+     NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY="your-anon-or-publishable-key"
+     SUPABASE_SECRET_KEY="your-secret-key"
      SUPABASE_STORAGE_BUCKET="attachments"
      ```
   4. Only image files (`image/png`, `image/jpeg`, `image/webp`, `image/gif`, `image/svg+xml`) up to **10MB** are accepted.

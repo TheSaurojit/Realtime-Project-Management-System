@@ -1,5 +1,5 @@
 import { notFound, redirect } from "next/navigation";
-import { getProjectByKey, getActivityLogs, getNotifications } from "@/lib/db";
+import { getProjectByKey, getActivityLogs, getNotifications, SAFE_USER_SELECT } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth/session";
 import { getEffectiveProjectAccess } from "@/lib/rbac/server";
 import { prisma } from "@/lib/prisma";
@@ -36,7 +36,7 @@ export default async function ProjectPage({
       where: { id: project.workspaceId },
       select: {
         members: {
-          include: { user: true },
+          include: { user: { select: SAFE_USER_SELECT } },
         },
       },
     }),

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth/session";
 import { getEffectiveProjectAccess } from "@/lib/rbac/server";
 import { canManageProjectMembers } from "@/lib/rbac/permissions";
-import { addProjectMember, removeProjectMember, getProjectMembers } from "@/lib/db";
+import { addProjectMember, removeProjectMember, getProjectMembers, SAFE_USER_SELECT } from "@/lib/db";
 import { prisma } from "@/lib/prisma";
 
 export async function GET(
@@ -34,7 +34,7 @@ export async function GET(
             id: true,
             name: true,
             members: {
-              include: { user: true },
+              include: { user: { select: SAFE_USER_SELECT } },
             },
           },
         },

@@ -3,6 +3,7 @@ import { moveTask } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth/session";
 import { broadcastRealtimeEvent } from "@/lib/realtime/server";
 import { requireTaskWorkspaceAccess } from "@/lib/rbac/server";
+import { sanitizeSensitiveFields } from "@/lib/utils";
 
 export async function POST(
   request: NextRequest,
@@ -50,7 +51,7 @@ export async function POST(
       });
     });
 
-    return NextResponse.json({ success: true, task: result });
+    return NextResponse.json({ success: true, task: sanitizeSensitiveFields(result) });
   } catch (error: unknown) {
     console.error("[API] Task move failed:", error);
     const message = error instanceof Error ? error.message : "Internal server error";

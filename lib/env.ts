@@ -85,27 +85,34 @@ export const env = {
   },
 
   get NEXT_PUBLIC_SUPABASE_URL(): string | undefined {
-    return process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+    return process.env.NEXT_PUBLIC_SUPABASE_URL ;
   },
 
-  get NEXT_PUBLIC_SUPABASE_ANON_KEY(): string | undefined {
-    return process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
+  get NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY(): string | undefined {
+    return (
+      process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY 
+    );
   },
 
-  get SUPABASE_SERVICE_ROLE_KEY(): string | undefined {
-    return process.env.SUPABASE_SERVICE_ROLE_KEY;
+  get SUPABASE_SECRET_KEY(): string | undefined {
+    return (
+      process.env.SUPABASE_SECRET_KEY
+    );
   },
 
   get SUPABASE_STORAGE_BUCKET(): string {
-    return process.env.SUPABASE_STORAGE_BUCKET || process.env.NEXT_PUBLIC_SUPABASE_STORAGE_BUCKET || "attachments";
+    return (
+      process.env.SUPABASE_STORAGE_BUCKET ||
+      process.env.NEXT_PUBLIC_SUPABASE_STORAGE_BUCKET ||
+      "attachments"
+    );
   },
 
   get isSupabaseConfigured(): boolean {
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+    const url = this.NEXT_PUBLIC_SUPABASE_URL;
     const key =
-      process.env.SUPABASE_SERVICE_ROLE_KEY ||
-      process.env.SUPABASE_ANON_KEY ||
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+      this.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+      this.SUPABASE_SECRET_KEY;
     return Boolean(url && key);
   },
 };

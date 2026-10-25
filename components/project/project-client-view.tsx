@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import {
   Project,
@@ -56,8 +56,47 @@ export function ProjectClientView({
   const [columns] = useState<BoardColumn[]>(project.columns || []);
   const [currentView, setCurrentView] = useState<"board" | "list" | "calendar" | "activity">("board");
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  const [isLoadingTaskDetails, setIsLoadingTaskDetails] = useState(false);
+  const taskDetailsCache = useRef<Map<string, Task>>(new Map());
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
+
+  // Load task details on-demand when opening modal
+  const handleOpenTaskDetail = useCallback(async (task: Task) => {
+    // If task already has complete details loaded, display it immediately
+    if (task.comments && task.attachments && task.description !== undefined) {
+      setSelectedTask(task);
+      return;
+    }
+
+    const cached = taskDetailsCache.current.get(task.id);
+    if (cached && cached.comments && cached.attachments) {
+      setSelectedTask(cached);
+      return;
+    }
+
+    // Open modal immediately with available lightweight summary (0ms perceived lag)
+    setSelectedTask(task);
+    setIsLoadingTaskDetails(true);
+
+    try {
+      const res = await fetch(`/api/tasks/${task.id}`);
+      if (res.ok) {
+        const fullTask: Task = await res.json();
+        taskDetailsCache.current.set(task.id, fullTask);
+        setSelectedTask((current) => {
+          if (current && current.id === task.id) {
+            return fullTask;
+          }
+          return current;
+        });
+      }
+    } catch (err) {
+      console.error("[Task Details Fetch Error]:", err);
+    } finally {
+      setIsLoadingTaskDetails(false);
+    }
+  }, []);
 
   const [filters, setFilters] = useState<FilterState>({
     search: "",
@@ -282,6 +321,7 @@ export function ProjectClientView({
     if (selectedTask && selectedTask.id === taskId) {
       setSelectedTask(null);
     }
+    taskDetailsCache.current.delete(taskId);
 
     await mutateTask(
       (prev) => prev.filter((t) => t.id !== taskId),
@@ -304,7 +344,14 @@ export function ProjectClientView({
             if (t.id !== taskId) return t;
             const existing = t.comments || [];
             if (existing.some((c) => c.id === comment.id)) return t;
-            return { ...t, comments: [...existing, comment] };
+            return {
+              ...t,
+              comments: [...existing, comment],
+              _count: {
+                ...t._count,
+                comments: (t._count?.comments || existing.length) + 1,
+              },
+            };
           })
         );
         if (selectedTask && selectedTask.id === taskId) {
@@ -312,7 +359,9 @@ export function ProjectClientView({
             if (!prev) return null;
             const existing = prev.comments || [];
             if (existing.some((c) => c.id === comment.id)) return prev;
-            return { ...prev, comments: [...existing, comment] };
+            const updated = { ...prev, comments: [...existing, comment] };
+            taskDetailsCache.current.set(taskId, updated);
+            return updated;
           });
         }
       }
@@ -358,6 +407,7 @@ export function ProjectClientView({
         const { task: updated } = await res.json();
         if (updated) {
           setTasks((prev) => prev.map((t) => (t.id === taskId ? updated : t)));
+          taskDetailsCache.current.set(taskId, updated);
           if (selectedTask && selectedTask.id === taskId) {
             setSelectedTask(updated);
           }
@@ -402,6 +452,7 @@ export function ProjectClientView({
 
       if (result.task) {
         setTasks((prev) => prev.map((t) => (t.id === taskId ? result.task : t)));
+        taskDetailsCache.current.set(taskId, result.task);
         if (selectedTask && selectedTask.id === taskId) {
           setSelectedTask(result.task);
         }
@@ -423,6 +474,7 @@ export function ProjectClientView({
       }
       if (result.task) {
         setTasks((prev) => prev.map((t) => (t.id === taskId ? result.task : t)));
+        taskDetailsCache.current.set(taskId, result.task);
         if (selectedTask && selectedTask.id === taskId) {
           setSelectedTask(result.task);
         }

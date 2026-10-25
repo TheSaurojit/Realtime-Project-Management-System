@@ -15,6 +15,9 @@ import {
   Attachment,
   Team,
 } from "@/lib/types";
+import { parseMentionedUserIds } from "@/lib/utils";
+
+export { parseMentionedUserIds };
 
 /**
  * Normalizes column names into canonical TaskStatus enum values.
@@ -35,6 +38,21 @@ export function mapColumnNameToStatus(columnName: string): TaskStatus {
   }
   return "TODO";
 }
+
+/**
+ * Reusable projection for User relations to ensure sensitive fields (like passwordHash)
+ * are NEVER retrieved from the database during regular queries or sent to the browser.
+ */
+export const SAFE_USER_SELECT = {
+  id: true,
+  name: true,
+  email: true,
+  avatarUrl: true,
+  emailVerified: true,
+  emailVerifiedAt: true,
+  createdAt: true,
+  updatedAt: true,
+} as const;
 
 /**
  * Lightweight query specifically for rendering the navigation sidebar.
@@ -119,14 +137,14 @@ export async function getWorkspaceBySlug(slug: string): Promise<Workspace | null
       include: {
         members: {
           include: {
-            user: true,
+            user: { select: SAFE_USER_SELECT },
           },
         },
         teams: {
           include: {
             members: {
               include: {
-                user: true,
+                user: { select: SAFE_USER_SELECT },
               },
             },
           },
@@ -147,12 +165,7 @@ export async function getWorkspaceBySlug(slug: string): Promise<Workspace | null
           orderBy: { createdAt: "desc" },
           include: {
             inviter: {
-              select: {
-                id: true,
-                name: true,
-                email: true,
-                avatarUrl: true,
-              },
+              select: SAFE_USER_SELECT,
             },
           },
         },
@@ -185,36 +198,62 @@ export async function getProjectByKey(workspaceSlug: string, projectKey: string)
         },
       },
       include: {
-        lead: true,
+        lead: { select: SAFE_USER_SELECT },
         team: {
           include: {
             members: {
-              include: { user: true },
+              include: { user: { select: SAFE_USER_SELECT } },
             },
           },
         },
         members: {
-          include: { user: true },
+          include: { user: { select: SAFE_USER_SELECT } },
         },
         columns: {
           orderBy: { position: "asc" },
           include: {
             tasks: {
               orderBy: { position: "asc" },
-              include: {
-                reporter: true,
-                assignees: { include: { user: true } },
-                labels: { include: { label: true } },
-                checklists: {
-                  include: {
-                    items: { orderBy: { position: "asc" } },
+              select: {
+                id: true,
+                projectId: true,
+                columnId: true,
+                taskKey: true,
+                title: true,
+                priority: true,
+                status: true,
+                position: true,
+                dueDate: true,
+                startDate: true,
+                points: true,
+                reporterId: true,
+                createdAt: true,
+                updatedAt: true,
+                assignees: {
+                  select: {
+                    user: { select: SAFE_USER_SELECT },
                   },
                 },
-                attachments: true,
-                comments: {
-                  orderBy: { createdAt: "desc" },
-                  take: 50,
-                  include: { author: true },
+                labels: {
+                  select: {
+                    label: {
+                      select: { id: true, name: true, color: true },
+                    },
+                  },
+                },
+                checklists: {
+                  select: {
+                    id: true,
+                    items: {
+                      select: { isCompleted: true },
+                    },
+                  },
+                },
+                _count: {
+                  select: {
+                    comments: true,
+                    attachments: true,
+                  },
                 },
               },
             },
@@ -301,7 +340,7 @@ export async function createProject(data: {
       },
     },
     include: {
-      lead: true,
+      lead: { select: SAFE_USER_SELECT },
       team: true,
       columns: {
         orderBy: { position: "asc" },
@@ -408,7 +447,7 @@ export async function getProjectMembers(projectId: string) {
   return await prisma.projectMember.findMany({
     where: { projectId },
     include: {
-      user: true,
+      user: { select: SAFE_USER_SELECT },
     },
     orderBy: { joinedAt: "asc" },
   });
@@ -460,7 +499,7 @@ export async function addProjectMember(data: {
       role,
     },
     include: {
-      user: true,
+      user: { select: SAFE_USER_SELECT },
     },
   });
 }
@@ -538,7 +577,7 @@ export async function createTeam(data: {
     include: {
       members: {
         include: {
-          user: true,
+          user: { select: SAFE_USER_SELECT },
         },
       },
     },
@@ -591,14 +630,14 @@ export async function getTeamById(teamId: string, workspaceIdOrSlug?: string) {
             ownerId: true,
             members: {
               include: {
-                user: true,
+                user: { select: SAFE_USER_SELECT },
               },
             },
           },
         },
         members: {
           include: {
-            user: true,
+            user: { select: SAFE_USER_SELECT },
           },
           orderBy: { joinedAt: "asc" },
         },
@@ -703,7 +742,7 @@ export async function updateTeam(data: {
     include: {
       members: {
         include: {
-          user: true,
+          user: { select: SAFE_USER_SELECT },
         },
       },
       projects: true,
@@ -719,8 +758,8 @@ export async function getTaskById(taskId: string): Promise<Task | null> {
       where: { id: taskId },
       include: {
         project: true,
-        reporter: true,
-        assignees: { include: { user: true } },
+        reporter: { select: SAFE_USER_SELECT },
+        assignees: { include: { user: { select: SAFE_USER_SELECT } } },
         labels: { include: { label: true } },
         checklists: {
           include: {
@@ -730,7 +769,7 @@ export async function getTaskById(taskId: string): Promise<Task | null> {
         attachments: true,
         comments: {
           orderBy: { createdAt: "desc" },
-          include: { author: true },
+          include: { author: { select: SAFE_USER_SELECT } },
         },
       },
     });
@@ -781,6 +820,45 @@ export async function createTask(data: {
         });
         if (!column || column.projectId !== data.projectId) {
           throw new Error("Target column does not belong to the project.");
+        }
+
+        // Validate assignees belong to the workspace
+        const uniqueAssigneeIds = Array.from(new Set((data.assigneeIds || []).filter(Boolean)));
+        if (uniqueAssigneeIds.length > 0) {
+          const members = await tx.workspaceMember.findMany({
+            where: {
+              workspaceId: project.workspaceId,
+              userId: { in: uniqueAssigneeIds },
+            },
+            select: { userId: true },
+          });
+          const validUserSet = new Set(members.map((m) => m.userId));
+          if (project.workspace.ownerId) {
+            validUserSet.add(project.workspace.ownerId);
+          }
+
+          const invalidAssignee = uniqueAssigneeIds.find((id) => !validUserSet.has(id));
+          if (invalidAssignee) {
+            throw new Error(`Assignee ${invalidAssignee} does not belong to this workspace.`);
+          }
+        }
+
+        // Validate labels belong to the workspace
+        const uniqueLabelIds = Array.from(new Set((data.labelIds || []).filter(Boolean)));
+        if (uniqueLabelIds.length > 0) {
+          const labels = await tx.label.findMany({
+            where: {
+              id: { in: uniqueLabelIds },
+              workspaceId: project.workspaceId,
+            },
+            select: { id: true },
+          });
+          const validLabelSet = new Set(labels.map((l) => l.id));
+
+          const invalidLabel = uniqueLabelIds.find((id) => !validLabelSet.has(id));
+          if (invalidLabel) {
+            throw new Error(`Label ${invalidLabel} does not belong to this workspace.`);
+          }
         }
 
         // Determine the next sequential task key number by taking the maximum of existing tasks and current sequence counter
@@ -843,19 +921,19 @@ export async function createTask(data: {
             points: 1,
             reporterId: data.reporterId,
             assignees: {
-              create: (data.assigneeIds || []).map((userId) => ({ userId })),
+              create: uniqueAssigneeIds.map((userId) => ({ userId })),
             },
             labels: {
-              create: (data.labelIds || []).map((labelId) => ({ labelId })),
+              create: uniqueLabelIds.map((labelId) => ({ labelId })),
             },
           },
           include: {
-            reporter: true,
-            assignees: { include: { user: true } },
+            reporter: { select: SAFE_USER_SELECT },
+            assignees: { include: { user: { select: SAFE_USER_SELECT } } },
             labels: { include: { label: true } },
             checklists: { include: { items: true } },
             attachments: true,
-            comments: { include: { author: true } },
+            comments: { include: { author: { select: SAFE_USER_SELECT } } },
           },
         });
 
@@ -917,25 +995,46 @@ export async function updateTask(
         }
       }
 
+      let newStatus: TaskStatus | undefined = updates.status;
+
+      if (updates.columnId !== undefined) {
+        const destCol = await tx.boardColumn.findUnique({
+          where: { id: updates.columnId },
+          select: { id: true, projectId: true, name: true },
+        });
+
+        if (!destCol) {
+          throw new Error("Column not found.");
+        }
+
+        if (destCol.projectId !== existing.projectId) {
+          throw new Error("Destination column does not belong to the task's project.");
+        }
+
+        if (!newStatus) {
+          newStatus = mapColumnNameToStatus(destCol.name);
+        }
+      }
+
       const updated = await tx.task.update({
         where: { id: taskId },
         data: {
           title: updates.title !== undefined ? updates.title.trim() : undefined,
           description: updates.description !== undefined ? updates.description : undefined,
           priority: updates.priority,
-          status: updates.status,
+          status: newStatus,
           points: updates.points !== undefined ? updates.points : undefined,
           dueDate: parsedDueDate,
           columnId: updates.columnId !== undefined ? updates.columnId : undefined,
         },
         include: {
           project: true,
-          reporter: true,
-          assignees: { include: { user: true } },
+          reporter: { select: SAFE_USER_SELECT },
+          assignees: { include: { user: { select: SAFE_USER_SELECT } } },
           labels: { include: { label: true } },
           checklists: { include: { items: true } },
           attachments: true,
-          comments: { include: { author: true } },
+          comments: { include: { author: { select: SAFE_USER_SELECT } } },
         },
       });
 
@@ -956,7 +1055,7 @@ export async function updateTask(
     });
   } catch (error) {
     console.error("[DB] updateTask error:", error);
-    return null;
+    throw error;
   }
 }
 
@@ -994,12 +1093,12 @@ export async function moveTask(
         },
         include: {
           project: true,
-          reporter: true,
-          assignees: { include: { user: true } },
+          reporter: { select: SAFE_USER_SELECT },
+          assignees: { include: { user: { select: SAFE_USER_SELECT } } },
           labels: { include: { label: true } },
           checklists: { include: { items: true } },
           attachments: true,
-          comments: { include: { author: true } },
+          comments: { include: { author: { select: SAFE_USER_SELECT } } },
         },
       });
 
@@ -1060,7 +1159,11 @@ export async function deleteTask(taskId: string, actorId?: string): Promise<bool
   }
 }
 
-export async function addComment(taskId: string, authorId: string, content: string): Promise<Comment | null> {
+export async function addComment(
+  taskId: string,
+  authorId: string,
+  content: string
+): Promise<(Comment & { notifications?: Notification[] }) | null> {
   try {
     return await prisma.$transaction(async (tx) => {
       const comment = await tx.comment.create({
@@ -1070,8 +1173,14 @@ export async function addComment(taskId: string, authorId: string, content: stri
           content: content.trim(),
         },
         include: {
-          author: true,
-          task: { include: { project: true } },
+          author: { select: SAFE_USER_SELECT },
+          task: {
+            include: {
+              project: {
+                include: { workspace: true },
+              },
+            },
+          },
         },
       });
 
@@ -1088,6 +1197,62 @@ export async function addComment(taskId: string, authorId: string, content: stri
         });
       }
 
+      const createdNotifications: Notification[] = [];
+
+      // Parse and process @mentions
+      if (comment.task?.project?.workspace) {
+        const workspaceId = comment.task.project.workspaceId;
+        const workspaceSlug = comment.task.project.workspace.slug;
+        const projectKey = comment.task.project.key;
+        const taskKey = comment.task.taskKey;
+
+        // Fetch candidate members in this workspace
+        const members = await tx.workspaceMember.findMany({
+          where: { workspaceId },
+          include: {
+            user: { select: { id: true, name: true, email: true } },
+          },
+        });
+
+        const candidateUsers: { id: string; name: string; email?: string }[] = members
+          .map((m) => m.user)
+          .filter((u): u is { id: string; name: string; email: string } => Boolean(u));
+
+        // If workspace owner is not in members list, include owner
+        if (
+          comment.task.project.workspace.ownerId &&
+          !candidateUsers.some((u) => u.id === comment.task.project.workspace.ownerId)
+        ) {
+          const owner = await tx.user.findUnique({
+            where: { id: comment.task.project.workspace.ownerId },
+            select: { id: true, name: true, email: true },
+          });
+          if (owner) candidateUsers.push(owner);
+        }
+
+        const mentionedUserIds = parseMentionedUserIds(content, candidateUsers, authorId);
+
+        if (mentionedUserIds.length > 0) {
+          const authorName = comment.author?.name || "A teammate";
+          const preview = content.length > 80 ? content.slice(0, 77) + "..." : content;
+
+          for (const targetUserId of mentionedUserIds) {
+            const notif = await tx.notification.create({
+              data: {
+                userId: targetUserId,
+                actorId: authorId,
+                type: "MENTION",
+                title: `${authorName} mentioned you`,
+                message: `${authorName} mentioned you on ${taskKey}: "${preview}"`,
+                link: `/workspace/${workspaceSlug}/project/${projectKey}?task=${taskKey}`,
+              },
+              include: { actor: { select: SAFE_USER_SELECT } },
+            });
+            createdNotifications.push(notif as unknown as Notification);
+          }
+        }
+      }
+
       return {
         id: comment.id,
         taskId: comment.taskId,
@@ -1096,6 +1261,7 @@ export async function addComment(taskId: string, authorId: string, content: stri
         createdAt: comment.createdAt.toISOString(),
         updatedAt: comment.updatedAt.toISOString(),
         author: comment.author as unknown as User,
+        notifications: createdNotifications,
       };
     });
   } catch (error) {
@@ -1189,7 +1355,7 @@ export async function addAttachment(
           fileSize: file.fileSize,
         },
         include: {
-          uploader: true,
+          uploader: { select: SAFE_USER_SELECT },
           task: { include: { project: true } },
         },
       });
@@ -1233,7 +1399,7 @@ export async function deleteAttachment(
       const att = await tx.attachment.findUnique({
         where: { id: attachmentId },
         include: {
-          uploader: true,
+          uploader: { select: SAFE_USER_SELECT },
           task: { include: { project: true } },
         },
       });
@@ -1299,7 +1465,7 @@ export async function getActivityLogs(params?: {
       orderBy: { createdAt: "desc" },
       take: params?.limit || 50,
       include: {
-        actor: true,
+        actor: { select: SAFE_USER_SELECT },
         task: {
           select: {
             id: true,
@@ -1323,7 +1489,7 @@ export async function getNotifications(userId: string): Promise<Notification[]> 
       where: { userId },
       orderBy: { createdAt: "desc" },
       take: 20,
-      include: { actor: true },
+      include: { actor: { select: SAFE_USER_SELECT } },
     });
     return notifs as unknown as Notification[];
   } catch (error) {
@@ -1381,7 +1547,7 @@ export async function createNotification(data: {
         message: data.message,
         link: data.link,
       },
-      include: { actor: true },
+      include: { actor: { select: SAFE_USER_SELECT } },
     });
     return notif as unknown as Notification;
   } catch (error) {
@@ -1416,7 +1582,7 @@ export async function addWorkspaceMember(
       role,
     },
     include: {
-      user: true,
+      user: { select: SAFE_USER_SELECT },
       workspace: true,
     },
   });
@@ -1497,7 +1663,11 @@ export async function createWorkspaceInvitation(
 /**
  * Accepts an invitation token and adds the user to the workspace.
  */
-export async function acceptWorkspaceInvitation(token: string, userId: string) {
+export async function acceptWorkspaceInvitation(
+  token: string,
+  userId: string,
+  options?: { confirmDifferentAccount?: boolean }
+) {
   return await prisma.$transaction(async (tx) => {
     const invitation = await tx.workspaceInvitation.findUnique({
       where: { token },
@@ -1510,6 +1680,22 @@ export async function acceptWorkspaceInvitation(token: string, userId: string) {
 
     if (new Date() > invitation.expiresAt) {
       throw new Error("Invitation has expired.");
+    }
+
+    const user = await tx.user.findUnique({
+      where: { id: userId },
+      select: { id: true, email: true },
+    });
+
+    if (!user) {
+      throw new Error("User not found.");
+    }
+
+    const isEmailMatch = user.email.toLowerCase().trim() === invitation.email.toLowerCase().trim();
+    if (!isEmailMatch && !options?.confirmDifferentAccount) {
+      throw new Error(
+        "This invitation was sent to a different email address. Please explicitly confirm you want to join with this account."
+      );
     }
 
     const membership = await tx.workspaceMember.upsert({
@@ -1525,7 +1711,7 @@ export async function acceptWorkspaceInvitation(token: string, userId: string) {
         userId,
         role: invitation.role,
       },
-      include: { workspace: true, user: true },
+      include: { workspace: true, user: { select: SAFE_USER_SELECT } },
     });
 
     await tx.workspaceInvitation.delete({
@@ -1598,7 +1784,6 @@ export async function findUserById(id: string) {
         email: user.email,
         name: user.name,
         avatarUrl: user.avatarUrl,
-        passwordHash: user.passwordHash,
         emailVerified: user.emailVerified,
         emailVerifiedAt: user.emailVerifiedAt ? user.emailVerifiedAt.toISOString() : null,
         workspaceMemberships: user.workspaceMemberships,
@@ -1626,7 +1811,7 @@ export async function getUserWorkspaces(userId: string): Promise<(Workspace & { 
                 columns: true,
               },
             },
-            members: { include: { user: true } },
+            members: { include: { user: { select: SAFE_USER_SELECT } } },
             teams: true,
           },
         },
@@ -1722,7 +1907,7 @@ export async function createWorkspace(data: {
     },
     include: {
       members: {
-        include: { user: true },
+        include: { user: { select: SAFE_USER_SELECT } },
       },
       projects: {
         include: {

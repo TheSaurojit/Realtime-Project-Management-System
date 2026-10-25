@@ -35,8 +35,8 @@ export const TaskCard = memo(function TaskCard({
       0
     ) || 0;
 
-  const commentsCount = task.comments?.length || 0;
-  const attachmentsCount = task.attachments?.length || 0;
+  const commentsCount = task._count?.comments ?? task.comments?.length ?? 0;
+  const attachmentsCount = task._count?.attachments ?? task.attachments?.length ?? 0;
 
   return (
     <Draggable

@@ -41,6 +41,7 @@ export function TaskDetailModal({
   onAddAttachment,
   onDeleteAttachment,
   readOnly: readOnlyProp,
+  isLoadingDetails = false,
 }: {
   task: Task | null;
   columns: BoardColumn[];
@@ -60,6 +61,7 @@ export function TaskDetailModal({
   ) => Promise<void>;
   onDeleteAttachment?: (taskId: string, attachmentId: string) => Promise<void>;
   readOnly?: boolean;
+  isLoadingDetails?: boolean;
 }) {
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [titleValue, setTitleValue] = useState("");
@@ -272,6 +274,8 @@ export function TaskDetailModal({
                     </Button>
                   </div>
                 </div>
+              ) : isLoadingDetails && task.description === undefined ? (
+                <div className="h-16 bg-slate-100 dark:bg-slate-800/60 rounded-xl animate-pulse" />
               ) : (
                 <div
                   onClick={() => {
@@ -298,45 +302,66 @@ export function TaskDetailModal({
 
             {/* Checklists */}
             <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
-              <ChecklistManager
-                checklists={task.checklists || []}
-                taskId={task.id}
-                readOnly={readOnly}
-                onToggleItem={(chkId, itemId) =>
-                  onToggleChecklistItem(task.id, chkId, itemId)
-                }
-                onAddItem={(chkId, content) =>
-                  onAddChecklistItem(task.id, chkId, content)
-                }
-              />
+              {isLoadingDetails && !task.checklists?.[0]?.items?.[0]?.content ? (
+                <div className="space-y-2 py-2">
+                  <div className="h-4 w-28 bg-slate-100 dark:bg-slate-800 rounded animate-pulse" />
+                  <div className="h-10 bg-slate-100 dark:bg-slate-800/60 rounded-xl animate-pulse" />
+                </div>
+              ) : (
+                <ChecklistManager
+                  checklists={task.checklists || []}
+                  taskId={task.id}
+                  readOnly={readOnly}
+                  onToggleItem={(chkId, itemId) =>
+                    onToggleChecklistItem(task.id, chkId, itemId)
+                  }
+                  onAddItem={(chkId, content) =>
+                    onAddChecklistItem(task.id, chkId, content)
+                  }
+                />
+              )}
             </div>
 
             {/* Attachments */}
             <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
-              <AttachmentUploader
-                attachments={task.attachments || []}
-                taskId={task.id}
-                currentUser={currentUser}
-                readOnly={readOnly}
-                onAddAttachment={(file) => onAddAttachment(task.id, file)}
-                onDeleteAttachment={
-                  onDeleteAttachment
-                    ? (attachmentId) => onDeleteAttachment(task.id, attachmentId)
-                    : undefined
-                }
-              />
+              {isLoadingDetails && !task.attachments ? (
+                <div className="space-y-2 py-2">
+                  <div className="h-4 w-28 bg-slate-100 dark:bg-slate-800 rounded animate-pulse" />
+                  <div className="h-12 bg-slate-100 dark:bg-slate-800/60 rounded-xl animate-pulse" />
+                </div>
+              ) : (
+                <AttachmentUploader
+                  attachments={task.attachments || []}
+                  taskId={task.id}
+                  currentUser={currentUser}
+                  readOnly={readOnly}
+                  onAddAttachment={(file) => onAddAttachment(task.id, file)}
+                  onDeleteAttachment={
+                    onDeleteAttachment
+                      ? (attachmentId) => onDeleteAttachment(task.id, attachmentId)
+                      : undefined
+                  }
+                />
+              )}
             </div>
 
             {/* Comments Stream */}
             <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
-              <CommentsStream
-                comments={task.comments || []}
-                taskId={task.id}
-                currentUser={currentUser}
-                users={availableUsers}
-                readOnly={readOnly}
-                onAddComment={(content) => onAddComment(task.id, content)}
-              />
+              {isLoadingDetails && !task.comments ? (
+                <div className="space-y-2 py-2">
+                  <div className="h-4 w-28 bg-slate-100 dark:bg-slate-800 rounded animate-pulse" />
+                  <div className="h-16 bg-slate-100 dark:bg-slate-800/60 rounded-xl animate-pulse" />
+                </div>
+              ) : (
+                <CommentsStream
+                  comments={task.comments || []}
+                  taskId={task.id}
+                  currentUser={currentUser}
+                  users={availableUsers}
+                  readOnly={readOnly}
+                  onAddComment={(content) => onAddComment(task.id, content)}
+                />
+              )}
             </div>
           </div>
 

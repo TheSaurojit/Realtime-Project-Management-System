@@ -3,6 +3,7 @@ import { addComment } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth/session";
 import { broadcastRealtimeEvent } from "@/lib/realtime/server";
 import { requireTaskWorkspaceAccess } from "@/lib/rbac/server";
+import { sanitizeSensitiveFields } from "@/lib/utils";
 
 export async function POST(
   request: NextRequest,
@@ -25,19 +26,34 @@ export async function POST(
       return NextResponse.json({ error: "Content is required" }, { status: 400 });
     }
 
-    const comment = await addComment(taskId, user.id, content.trim());
-    if (!comment) {
+    const result = await addComment(taskId, user.id, content.trim());
+    if (!result) {
       return NextResponse.json({ error: "Failed to add comment" }, { status: 400 });
     }
+
+    const { notifications, ...commentData } = result;
+    const safeComment = sanitizeSensitiveFields(commentData);
 
     after(async () => {
       await broadcastRealtimeEvent(`project-${access.task.projectId}`, {
         type: "comment:created",
-        payload: { comment, taskId, projectId: access.task.projectId },
+        payload: { comment: safeComment, taskId, projectId: access.task.projectId },
       });
+
+      if (notifications && notifications.length > 0) {
+        for (const notif of notifications) {
+          await broadcastRealtimeEvent(`user-${notif.userId}`, {
+            type: "notification:created",
+            payload: {
+              notification: sanitizeSensitiveFields(notif),
+              userId: notif.userId,
+            },
+          });
+        }
+      }
     });
 
-    return NextResponse.json(comment, { status: 201 });
+    return NextResponse.json(safeComment, { status: 201 });
   } catch (error) {
     console.error("[API] Comment creation failed:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });

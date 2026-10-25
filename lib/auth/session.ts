@@ -61,7 +61,6 @@ export async function verifySessionToken(token: string): Promise<User | null> {
       email: dbUser.email,
       name: dbUser.name,
       avatarUrl: dbUser.avatarUrl,
-      passwordHash: dbUser.passwordHash,
       role,
       workspaceSlug: (payload.workspaceId as string) || dbUser.workspaceMemberships[0]?.workspace?.slug,
       projectKey: dbUser.workspaceMemberships[0]?.workspace?.projects[0]?.key,

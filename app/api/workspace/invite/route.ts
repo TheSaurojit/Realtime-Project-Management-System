@@ -136,12 +136,48 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { token } = await request.json();
+    const body = await request.json().catch(() => ({}));
+    const { token, confirmDifferentAccount } = body || {};
     if (!token) {
       return NextResponse.json({ error: "Invitation token is required" }, { status: 400 });
     }
 
-    const membership = await acceptWorkspaceInvitation(token, user.id);
+    // Check invitation in database first to give structured feedback if email differs without confirmation
+    const invitation = await prisma.workspaceInvitation.findUnique({
+      where: { token },
+      include: { workspace: true },
+    });
+
+    if (!invitation) {
+      return NextResponse.json(
+        { error: "This invitation link is invalid or has already been accepted." },
+        { status: 400 }
+      );
+    }
+
+    if (new Date() > invitation.expiresAt) {
+      return NextResponse.json(
+        { error: "This workspace invitation has expired. Please ask an administrator to send a new invite." },
+        { status: 400 }
+      );
+    }
+
+    const isEmailMatch = user.email.toLowerCase().trim() === invitation.email.toLowerCase().trim();
+    if (!isEmailMatch && !confirmDifferentAccount) {
+      return NextResponse.json(
+        {
+          error: "This invitation was sent to a different email address. Please explicitly confirm you want to join with this account or switch accounts.",
+          emailMismatch: true,
+          invitedEmail: invitation.email,
+          currentEmail: user.email,
+        },
+        { status: 400 }
+      );
+    }
+
+    const membership = await acceptWorkspaceInvitation(token, user.id, {
+      confirmDifferentAccount: Boolean(confirmDifferentAccount),
+    });
     return NextResponse.json({ success: true, workspace: membership.workspace });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Failed to accept invitation";

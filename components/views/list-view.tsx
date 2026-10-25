@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { BoardColumn, Task, User, TaskPriority, WorkspaceRole } from "@/lib/types";
 import { PriorityBadge, StatusBadge, LabelBadge } from "@/components/ui/badge";
 import { AvatarStack } from "@/components/ui/avatar";
@@ -22,6 +23,9 @@ export function ListView({
   onUpdateTask: (taskId: string, updates: Partial<Task>) => Promise<void>;
   readOnly?: boolean;
 }) {
+  const [visibleLimits, setVisibleLimits] = useState<Record<string, number>>({});
+  const getLimit = (colId: string) => visibleLimits[colId] || 40;
+
   const readOnly =
     readOnlyProp !== undefined
       ? readOnlyProp
@@ -47,6 +51,9 @@ export function ListView({
             const columnTasks = tasks.filter((t) => t.columnId === column.id);
             if (columnTasks.length === 0) return null;
 
+            const limit = getLimit(column.id);
+            const visibleColumnTasks = columnTasks.slice(0, limit);
+
             return (
               <div key={column.id} className="divide-y divide-slate-100 dark:divide-slate-800/60">
                 {/* Column Section Divider */}
@@ -66,7 +73,7 @@ export function ListView({
                 </div>
 
                 {/* Task rows */}
-                {columnTasks.map((task) => {
+                {visibleColumnTasks.map((task) => {
                   const { text: dueText, isOverdue, isToday } = formatDueDate(task.dueDate);
 
                   return (
@@ -159,6 +166,23 @@ export function ListView({
                     </div>
                   );
                 })}
+
+                {columnTasks.length > limit && (
+                  <div className="px-6 py-2.5 bg-slate-50/50 dark:bg-slate-800/20 text-center">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setVisibleLimits((prev) => ({
+                          ...prev,
+                          [column.id]: (prev[column.id] || 40) + 40,
+                        }))
+                      }
+                      className="text-xs text-indigo-600 dark:text-indigo-400 font-semibold hover:underline cursor-pointer"
+                    >
+                      Show 40 more ({columnTasks.length - limit} remaining in {column.name})
+                    </button>
+                  </div>
+                )}
               </div>
             );
           })}

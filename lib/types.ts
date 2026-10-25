@@ -8,11 +8,14 @@ export interface User {
   name: string;
   avatarUrl?: string | null;
   role?: WorkspaceRole;
-  passwordHash?: string;
   workspaceSlug?: string;
   projectKey?: string;
   emailVerified?: boolean;
   emailVerifiedAt?: string | null;
+}
+
+export interface UserWithPasswordHash extends User {
+  passwordHash: string;
 }
 
 export interface VerificationToken {
@@ -125,9 +128,14 @@ export interface Task {
   reporter?: User;
   assignees: { user: User }[];
   labels: { label: Label }[];
-  checklists: Checklist[];
-  attachments: Attachment[];
-  comments: Comment[];
+  checklists?: Checklist[];
+  attachments?: Attachment[];
+  comments?: Comment[];
+  _count?: {
+    comments?: number;
+    attachments?: number;
+    checklists?: number;
+  };
 }
 
 export interface BoardColumn {

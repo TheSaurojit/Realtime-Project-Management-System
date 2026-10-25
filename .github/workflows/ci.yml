@@ -11,9 +11,29 @@ jobs:
     name: Lint, Typecheck & Test
     runs-on: ubuntu-latest
 
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgrespassword
+          POSTGRES_DB: project_management
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     env:
-      DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/test_db?schema=public"
+      DATABASE_URL: "postgresql://postgres:postgrespassword@localhost:5433/project_management?schema=public"
       JWT_SECRET: "ci-pipeline-mock-secret-key-at-least-32-characters"
+      NEXT_PUBLIC_APP_URL: "http://localhost:3000"
+      NEXT_PUBLIC_SUPABASE_URL: "https://your-project-id.supabase.co"
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "mock-publishable-key-for-ci"
+      SUPABASE_SECRET_KEY: "mock-secret-key-for-ci"
+      SUPABASE_STORAGE_BUCKET: "attachments"
       NODE_ENV: test
 
     steps:
@@ -26,15 +46,17 @@ jobs:
           node-version: 20
           cache: "npm"
 
-      - name: Install dependencies
+      - name: Install dependencies (clean install)
         run: npm ci
 
-      - name: Generate Prisma Client
-        run: npx prisma generate
-
       - name: Run ESLint
-        run: npx eslint --quiet
+        run: npm run lint
 
       - name: Run TypeScript Compiler Check
         run: npx tsc --noEmit
 
+      - name: Push Prisma Schema to PostgreSQL
+        run: npx prisma db push --skip-generate
+
+      - name: Run Test Suite
+        run: npm test

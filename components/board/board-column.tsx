@@ -20,9 +20,22 @@ export const BoardColumn = memo(function BoardColumn({
   onTaskClick: (task: Task) => void;
   onQuickAdd: (columnId: string, title: string) => Promise<void>;
 }) {
+  const INITIAL_CARD_PAGE_SIZE = 30;
+  const [visibleCount, setVisibleCount] = useState(INITIAL_CARD_PAGE_SIZE);
   const [isAdding, setIsAdding] = useState(false);
   const [newTitle, setNewTitle] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const visibleTasks = tasks.slice(0, visibleCount);
+
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const target = e.currentTarget;
+    if (target.scrollHeight - target.scrollTop - target.clientHeight < 120) {
+      if (visibleCount < tasks.length) {
+        setVisibleCount((prev) => Math.min(prev + 30, tasks.length));
+      }
+    }
+  };
 
   const isWipExceeded =
     Boolean(column.wipLimit && column.wipLimit > 0) &&
@@ -83,13 +96,14 @@ export const BoardColumn = memo(function BoardColumn({
           <div
             ref={provided.innerRef}
             {...provided.droppableProps}
+            onScroll={handleScroll}
             className={`flex-1 p-2.5 space-y-2.5 overflow-y-auto min-h-[150px] transition-colors ${
               snapshot.isDraggingOver
                 ? "bg-indigo-50/50 dark:bg-indigo-950/20"
                 : ""
             }`}
           >
-            {tasks.map((task, index) => (
+            {visibleTasks.map((task, index) => (
               <TaskCard
                 key={task.id}
                 task={task}
@@ -99,6 +113,32 @@ export const BoardColumn = memo(function BoardColumn({
               />
             ))}
             {provided.placeholder}
+
+            {/* Pagination / Windowing Indicator */}
+            {tasks.length > visibleCount && (
+              <div className="pt-2 pb-1 space-y-1">
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setVisibleCount((prev) => Math.min(prev + 30, tasks.length))}
+                    className="flex-1 py-1.5 px-3 rounded-xl bg-slate-200/80 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700/80 text-slate-700 dark:text-slate-300 text-xs font-semibold transition-colors cursor-pointer text-center"
+                  >
+                    Show 30 more ({tasks.length - visibleCount} left)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setVisibleCount(tasks.length)}
+                    className="py-1.5 px-2.5 rounded-xl border border-slate-300 dark:border-slate-700 hover:bg-slate-200/60 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400 text-xs font-medium transition-colors cursor-pointer"
+                    title={`Render all ${tasks.length} cards`}
+                  >
+                    Show all
+                  </button>
+                </div>
+                <p className="text-[10px] text-center text-slate-400">
+                  Showing {visibleCount} of {tasks.length} cards
+                </p>
+              </div>
+            )}
 
             {/* Inline Add Task Form */}
             {isAdding ? (

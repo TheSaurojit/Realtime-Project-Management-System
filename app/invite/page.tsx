@@ -28,6 +28,16 @@ function InviteContent() {
 
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState(errorParam);
+  const [detectedInvitedEmail, setDetectedInvitedEmail] = useState(invitedEmail);
+  const [detectedCurrentEmail, setDetectedCurrentEmail] = useState(currentEmail);
+
+  const activeInvitedEmail = detectedInvitedEmail || invitedEmail;
+  const activeCurrentEmail = detectedCurrentEmail || currentEmail;
+  const isEmailMismatch = Boolean(
+    activeInvitedEmail &&
+      activeCurrentEmail &&
+      activeInvitedEmail.toLowerCase().trim() !== activeCurrentEmail.toLowerCase().trim()
+  );
 
   const handleAccept = async () => {
     if (!token) return;
@@ -38,11 +48,18 @@ function InviteContent() {
       const res = await fetch("/api/workspace/invite", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token }),
+        body: JSON.stringify({
+          token,
+          confirmDifferentAccount: isEmailMismatch ? true : undefined,
+        }),
       });
 
       const data = await res.json();
       if (!res.ok) {
+        if (data.emailMismatch && data.invitedEmail && data.currentEmail) {
+          setDetectedInvitedEmail(data.invitedEmail);
+          setDetectedCurrentEmail(data.currentEmail);
+        }
         throw new Error(data.error || "Failed to accept invitation");
       }
 
@@ -61,12 +78,12 @@ function InviteContent() {
     } catch {
       // Ignore logout errors
     }
-    const loginUrl = `/login?redirect=${encodeURIComponent(`/api/workspace/invite?token=${token}`)}&email=${encodeURIComponent(invitedEmail)}`;
+    const loginUrl = `/login?redirect=${encodeURIComponent(`/api/workspace/invite?token=${token}`)}&email=${encodeURIComponent(activeInvitedEmail)}`;
     router.push(loginUrl);
   };
 
   // If there's an error and no token to accept
-  if (errorMessage && (!token || !currentEmail)) {
+  if (errorMessage && (!token || !activeCurrentEmail)) {
     return (
       <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col justify-center items-center px-4 py-12">
         <div className="max-w-md w-full bg-white dark:bg-slate-900 rounded-3xl p-8 border border-slate-200 dark:border-slate-800 shadow-2xl text-center space-y-6 animate-in zoom-in-95 duration-200">
@@ -141,14 +158,14 @@ function InviteContent() {
         </div>
 
         {/* Email Mismatch Notice */}
-        {invitedEmail && currentEmail && invitedEmail.toLowerCase() !== currentEmail.toLowerCase() && (
+        {isEmailMismatch && (
           <div className="text-left bg-amber-50/70 dark:bg-amber-950/30 p-4 rounded-xl border border-amber-200 dark:border-amber-900/60 text-xs space-y-2 text-amber-800 dark:text-amber-200">
             <p className="font-semibold flex items-center gap-1.5">
               <Mail className="w-3.5 h-3.5" />
               Different Account Detected
             </p>
             <p className="text-[11px] text-amber-700/90 dark:text-amber-300 leading-relaxed">
-              This invitation was addressed to <strong>{invitedEmail}</strong>, but you are currently signed in as <strong>{currentEmail}</strong>.
+              This invitation was addressed to <strong>{activeInvitedEmail}</strong>, but you are currently signed in as <strong>{activeCurrentEmail}</strong>.
             </p>
             <p className="text-[11px] text-amber-600 dark:text-amber-400">
               You can accept and join using your current account, or switch to the intended email.
@@ -179,22 +196,22 @@ function InviteContent() {
               <>
                 <UserCheck className="w-4 h-4" />
                 <span>
-                  {currentEmail && invitedEmail && currentEmail.toLowerCase() !== invitedEmail.toLowerCase()
-                    ? `Accept as ${currentEmail}`
+                  {isEmailMismatch
+                    ? `Accept as ${activeCurrentEmail}`
                     : "Accept Invitation & Join"}
                 </span>
               </>
             )}
           </Button>
 
-          {invitedEmail && currentEmail && invitedEmail.toLowerCase() !== currentEmail.toLowerCase() && (
+          {isEmailMismatch && (
             <button
               type="button"
               onClick={handleSwitchAccount}
               className="w-full py-2 px-3 rounded-xl border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/60 text-slate-700 dark:text-slate-300 text-xs font-medium transition-colors flex items-center justify-center gap-1 cursor-pointer"
             >
               <ArrowLeft className="w-3.5 h-3.5" />
-              <span>Switch to {invitedEmail}</span>
+              <span>Switch to {activeInvitedEmail}</span>
             </button>
           )}
 

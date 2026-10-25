@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth/session";
 import { requireWorkspaceAccess } from "@/lib/rbac/server";
-import { deleteProject } from "@/lib/db";
+import { deleteProject, SAFE_USER_SELECT } from "@/lib/db";
 import { prisma } from "@/lib/prisma";
 import { broadcastRealtimeEvent } from "@/lib/realtime/server";
 
@@ -33,7 +33,7 @@ export async function GET(
       },
       include: {
         team: true,
-        lead: true,
+        lead: { select: SAFE_USER_SELECT },
         _count: {
           select: { tasks: true, members: true },
         },

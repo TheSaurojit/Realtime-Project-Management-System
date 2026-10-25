@@ -70,3 +70,91 @@ export function formatDueDate(dateInput: string | Date | null | undefined): { te
     isToday,
   };
 }
+
+/**
+ * Recursively strips sensitive credentials (e.g. passwordHash, raw secrets)
+ * from any object, array, or nested response before returning it to clients.
+ */
+export function sanitizeSensitiveFields<T>(data: T): T {
+  if (data === null || data === undefined) return data;
+
+  if (Array.isArray(data)) {
+    return data.map((item) => sanitizeSensitiveFields(item)) as unknown as T;
+  }
+
+  if (typeof data === "object") {
+    if (data instanceof Date || (typeof Buffer !== "undefined" && Buffer.isBuffer(data))) {
+      return data;
+    }
+
+    const cleaned: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(data)) {
+      if (key === "passwordHash") {
+        continue;
+      }
+      cleaned[key] = sanitizeSensitiveFields(value);
+    }
+    return cleaned as T;
+  }
+
+  return data;
+}
+
+/**
+ * Checks if a payload (or its stringified JSON) contains passwordHash or bcrypt hash strings.
+ */
+export function containsSensitiveCredentials(data: unknown): boolean {
+  if (data === null || data === undefined) return false;
+  const str = typeof data === "string" ? data : JSON.stringify(data);
+  if (!str) return false;
+  if (str.includes("passwordHash")) return true;
+  const bcryptRegex = /\$2[aby]?\$\d{2}\$[./A-Za-z0-9]{53}/;
+  return bcryptRegex.test(str);
+}
+
+/**
+ * Parses user mentions (@name or @emailPrefix) from text content
+ * against a list of candidate workspace/project users.
+ * Filters out self-mentions and duplicate mentions.
+ */
+export function parseMentionedUserIds(
+  content: string,
+  candidateUsers: { id: string; name: string; email?: string }[],
+  authorId?: string
+): string[] {
+  if (!content || !candidateUsers || candidateUsers.length === 0) {
+    return [];
+  }
+
+  const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const mentionedIds = new Set<string>();
+
+  for (const user of candidateUsers) {
+    if (authorId && user.id === authorId) {
+      continue; // Skip self-mentions
+    }
+
+    const trimmedName = user.name?.trim();
+    if (trimmedName && trimmedName.length >= 2) {
+      // Matches @Name at start of text, after whitespace, followed by word boundary, punctuation or whitespace
+      const namePattern = new RegExp(`(?:^|\\s)@${escapeRegex(trimmedName)}(?:\\b|\\s|[.,!?:;]|$)`, "i");
+      if (namePattern.test(content)) {
+        mentionedIds.add(user.id);
+        continue;
+      }
+    }
+
+    // Also support email prefix if at least 3 chars (e.g. @alice for alice@company.com)
+    if (user.email) {
+      const emailPrefix = user.email.split("@")[0]?.trim();
+      if (emailPrefix && emailPrefix.length >= 3) {
+        const emailPattern = new RegExp(`(?:^|\\s)@${escapeRegex(emailPrefix)}(?:\\b|\\s|[.,!?:;]|$)`, "i");
+        if (emailPattern.test(content)) {
+          mentionedIds.add(user.id);
+        }
+      }
+    }
+  }
+
+  return Array.from(mentionedIds);
+}

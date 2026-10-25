@@ -77,16 +77,19 @@ export function validateAttachmentImage(file: {
 export function getSupabaseConfig() {
   const url =
     process.env.NEXT_PUBLIC_SUPABASE_URL ||
+    process.env.SUPABASE_URL ||
     "";
 
-  // Use Service Role Key for server-side elevated storage operations if available,
-  // falling back to anon key.
+  // Use SUPABASE_SECRET_KEY for server-side elevated storage operations,
+  // falling back to NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY.
   const key =
+    process.env.SUPABASE_SECRET_KEY ||
     process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
     "";
 
   const bucket =
     process.env.SUPABASE_STORAGE_BUCKET ||
+    process.env.NEXT_PUBLIC_SUPABASE_STORAGE_BUCKET ||
     "attachments";
 
   return {
@@ -173,7 +176,7 @@ export async function uploadTaskAttachmentToSupabase(params: {
   const config = getSupabaseConfig();
   if (!config.isConfigured) {
     throw new Error(
-      "Supabase Storage is not configured. Please set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (or NEXT_PUBLIC_SUPABASE_ANON_KEY) in your .env file."
+      "Supabase Storage is not configured. Please set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SECRET_KEY (or NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY) in your .env file."
     );
   }
 

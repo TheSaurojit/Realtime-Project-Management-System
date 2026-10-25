@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth/session";
 import { requireWorkspaceAccess } from "@/lib/rbac/server";
 import { canManageTeams } from "@/lib/rbac/permissions";
-import { createTeam } from "@/lib/db";
+import { createTeam, SAFE_USER_SELECT } from "@/lib/db";
 import { prisma } from "@/lib/prisma";
 
 export async function POST(
@@ -78,7 +78,7 @@ export async function GET(
       include: {
         members: {
           include: {
-            user: true,
+            user: { select: SAFE_USER_SELECT },
           },
         },
         projects: {

@@ -3,6 +3,7 @@ import { addAttachment, deleteAttachment, getTaskById } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth/session";
 import { broadcastRealtimeEvent } from "@/lib/realtime/server";
 import { requireTaskWorkspaceAccess } from "@/lib/rbac/server";
+import { sanitizeSensitiveFields } from "@/lib/utils";
 import {
   validateAttachmentImage,
   uploadTaskAttachmentToSupabase,
@@ -128,11 +129,13 @@ export async function POST(
       });
     }
 
-    return NextResponse.json({
-      success: true,
-      task: updated,
-      attachment: createdAttachment,
-    });
+    return NextResponse.json(
+      sanitizeSensitiveFields({
+        success: true,
+        task: updated,
+        attachment: createdAttachment,
+      })
+    );
   } catch (error) {
     console.error("[API] Attachment upload error:", error);
     const message = error instanceof Error ? error.message : "Internal server error";
@@ -193,7 +196,7 @@ export async function DELETE(
       });
     }
 
-    return NextResponse.json({ success: true, task: updated });
+    return NextResponse.json({ success: true, task: sanitizeSensitiveFields(updated) });
   } catch (error) {
     console.error("[API] Delete attachment error:", error);
     const message = error instanceof Error ? error.message : "Internal server error";
