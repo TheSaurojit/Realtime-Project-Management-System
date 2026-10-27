@@ -28,8 +28,11 @@ export async function POST(
       return NextResponse.json({ error: "destColumnId is required" }, { status: 400 });
     }
 
-    if (typeof newPosition !== "number") {
-      return NextResponse.json({ error: "newPosition must be a number" }, { status: 400 });
+    if (!Number.isSafeInteger(newPosition) || newPosition < 0) {
+      return NextResponse.json(
+        { error: "newPosition must be a non-negative integer index" },
+        { status: 400 }
+      );
     }
 
     const sourceColumnId = access.task.columnId;
@@ -45,7 +48,7 @@ export async function POST(
           taskId,
           sourceColumnId,
           destColumnId,
-          newPosition,
+          newPosition: result.position,
           projectId: access.task.projectId,
         },
       });

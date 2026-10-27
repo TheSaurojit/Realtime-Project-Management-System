@@ -52,8 +52,9 @@ A high-performance, real-time Jira & Linear hybrid workspace built with **Next.j
 - **Calendar View**: Monthly interactive calendar plotting tasks by their due dates with overdue highlights.
 - **Activity Stream**: Workspace-wide audit log tracking card moves, edits, comments, and member additions.
 
-### ⚡ Real-Time Engine (Dual-Mode: Pusher + Native SSE Fallback)
-- **Multi-Provider Architecture**: Connects to **Pusher Channels** in production and seamlessly falls back to a **Native Server-Sent Events (SSE)** stream in local development.
+### ⚡ Real-Time Engine (Pusher in Production, SSE in Local Development)
+- **Shared Production Realtime**: Production requires **Pusher Channels**, so broadcasts are delivered across serverless and horizontally scaled app instances.
+- **Local Development Fallback**: Without Pusher credentials, local development uses a process-local Server-Sent Events (SSE) bus. This fallback is single-process only and is not supported for production or multi-instance deployments.
 - **Broadcast Events**: `task:created`, `task:updated`, `task:moved`, `task:deleted`, `comment:created`, `notification:created`.
 - **Zero Third-Party Requirement for Local Dev**: Runs 100% locally out-of-the-box without requiring any external paid API keys.
 
@@ -86,7 +87,7 @@ flowchart TD
         AuthMiddleware["JWT Auth & Session Verification"]
         RBAC["3-Tier RBAC Engine (Workspace + Squad + Project)"]
         API["REST & Mutation API Routes"]
-        SSEHub["Server-Sent Events Realtime Hub"]
+        SSEHub["Development-only in-process SSE Hub"]
     end
     
     subgraph StorageLayer["Data & Persistence Layer"]
@@ -95,20 +96,21 @@ flowchart TD
         Supabase[("Supabase Storage (Bucket: attachments)")]
     end
     
-    subgraph ExternalServices["Optional Integrations"]
+    subgraph ExternalServices["External Services"]
         Pusher["Pusher Channels (WebSockets)"]
         Resend["Resend API (Invitations & Verification)"]
     end
 
     User <-->|HTTP / Turbopack| AppServer
-    User <-->|SSE Stream / Pusher| SSEHub
+    User <-->|SSE (development)| SSEHub
+    User <-->|WebSocket (production)| Pusher
     AppServer --> AuthMiddleware
     AuthMiddleware --> RBAC
     RBAC --> API
     API --> Prisma
     Prisma --> Postgres
     API --> Supabase
-    API -.-> Pusher
+    API --> Pusher
     API -.-> Resend
 ```
 
@@ -124,7 +126,7 @@ flowchart TD
 | **ORM** | Prisma ORM 7.10.0 with `@prisma/adapter-pg` driver adapter |
 | **Authentication** | JWT (`jose`), secure HTTP-only cookies, password hashing with `bcryptjs` |
 | **Drag & Drop** | `@hello-pangea/dnd` |
-| **Realtime** | Pusher Channels (`pusher` / `pusher-js`) + Native Server-Sent Events (SSE) Fallback |
+| **Realtime** | Pusher Channels (`pusher` / `pusher-js`) in production; single-process SSE fallback in development |
 | **File Storage** | Supabase Storage (`@supabase/supabase-js`) |
 | **Email Service** | Resend API (`resend`) with automated console simulator fallback |
 | **Testing** | Vitest 3.2.7 |
@@ -215,7 +217,7 @@ JWT_SECRET="syncboard-super-secure-jwt-secret-key-32-chars-minimum"
 NEXT_PUBLIC_APP_URL="http://localhost:3000"
 
 # -----------------------------------------------------------------------------
-# Realtime Sync (Optional - SSE fallback runs automatically when blank)
+# Realtime Sync (Required in production; blank credentials use single-process SSE only in local development)
 # -----------------------------------------------------------------------------
 PUSHER_APP_ID=""
 NEXT_PUBLIC_PUSHER_KEY=""
@@ -236,6 +238,9 @@ NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY="your-anon-or-publishable-key"
 SUPABASE_SECRET_KEY="your-secret-key"
 SUPABASE_STORAGE_BUCKET="attachments"
 ```
+
+> [!IMPORTANT]
+> Configure `PUSHER_APP_ID`, `NEXT_PUBLIC_PUSHER_KEY`, and `PUSHER_SECRET` in the production environment before building and deploying. The app fails validation if production credentials are missing or incomplete. `NEXT_PUBLIC_PUSHER_CLUSTER` defaults to `mt1` when omitted. The in-process SSE fallback is for local, single-process development only; production SSE connections return `503`.
 
 > [!NOTE]
 > **Why Port 5433?**

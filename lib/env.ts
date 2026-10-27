@@ -22,6 +22,33 @@ export function validateEnv() {
   if (!process.env.DATABASE_URL) {
     throw new Error(`[CRITICAL] DATABASE_URL must be defined.`);
   }
+
+  const pusherVariables = [
+    "PUSHER_APP_ID",
+    "NEXT_PUBLIC_PUSHER_KEY",
+    "PUSHER_SECRET",
+  ] as const;
+  const configuredPusherVariables = pusherVariables.filter((name) =>
+    process.env[name]?.trim()
+  );
+  const pusherIsFullyConfigured = configuredPusherVariables.length === pusherVariables.length;
+
+  if (configuredPusherVariables.length > 0 && !pusherIsFullyConfigured) {
+    const missingVariables = pusherVariables.filter((name) => !process.env[name]?.trim());
+    throw new Error(
+      `[CRITICAL] Pusher configuration is incomplete. Set all of ${pusherVariables.join(", ")}. Missing: ${missingVariables.join(", ")}.`
+    );
+  }
+
+  if (
+    process.env.NODE_ENV === "production" &&
+    process.env.NEXT_PHASE !== "phase-production-build" &&
+    !pusherIsFullyConfigured
+  ) {
+    throw new Error(
+      `[CRITICAL] Production requires Pusher realtime. Set ${pusherVariables.join(", ")} before building or starting the app.`
+    );
+  }
 }
 
 // Fail fast in production or dev

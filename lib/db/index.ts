@@ -19,6 +19,8 @@ import { parseMentionedUserIds } from "@/lib/utils";
 
 export { parseMentionedUserIds };
 
+const TASK_PAGE_SIZE = 30;
+
 /**
  * Normalizes column names into canonical TaskStatus enum values.
  */
@@ -53,6 +55,49 @@ export const SAFE_USER_SELECT = {
   createdAt: true,
   updatedAt: true,
 } as const;
+
+const TASK_SUMMARY_SELECT = {
+  id: true,
+  projectId: true,
+  columnId: true,
+  taskKey: true,
+  title: true,
+  priority: true,
+  status: true,
+  position: true,
+  dueDate: true,
+  startDate: true,
+  points: true,
+  reporterId: true,
+  createdAt: true,
+  updatedAt: true,
+  assignees: {
+    select: {
+      user: { select: SAFE_USER_SELECT },
+    },
+  },
+  labels: {
+    select: {
+      label: {
+        select: { id: true, name: true, color: true },
+      },
+    },
+  },
+  checklists: {
+    select: {
+      id: true,
+      items: {
+        select: { isCompleted: true },
+      },
+    },
+  },
+  _count: {
+    select: {
+      comments: true,
+      attachments: true,
+    },
+  },
+} satisfies Prisma.TaskSelect;
 
 /**
  * Lightweight query specifically for rendering the navigation sidebar.
@@ -212,52 +257,18 @@ export async function getProjectByKey(workspaceSlug: string, projectKey: string)
         columns: {
           orderBy: { position: "asc" },
           include: {
+            _count: {
+              select: { tasks: true },
+            },
             tasks: {
-              orderBy: { position: "asc" },
-              select: {
-                id: true,
-                projectId: true,
-                columnId: true,
-                taskKey: true,
-                title: true,
-                priority: true,
-                status: true,
-                position: true,
-                dueDate: true,
-                startDate: true,
-                points: true,
-                reporterId: true,
-                createdAt: true,
-                updatedAt: true,
-                assignees: {
-                  select: {
-                    user: { select: SAFE_USER_SELECT },
-                  },
-                },
-                labels: {
-                  select: {
-                    label: {
-                      select: { id: true, name: true, color: true },
-                    },
-                  },
-                },
-                checklists: {
-                  select: {
-                    id: true,
-                    items: {
-                      select: { isCompleted: true },
-                    },
-                  },
-                },
-                _count: {
-                  select: {
-                    comments: true,
-                    attachments: true,
-                  },
-                },
-              },
+              take: TASK_PAGE_SIZE,
+              orderBy: [{ position: "asc" }, { id: "asc" }],
+              select: TASK_SUMMARY_SELECT,
             },
           },
+        },
+        _count: {
+          select: { tasks: true },
         },
       },
     });
@@ -270,6 +281,56 @@ export async function getProjectByKey(workspaceSlug: string, projectKey: string)
   }
 
   return null;
+}
+
+export async function getProjectTasksPage(
+  projectId: string,
+  columnId: string,
+  cursor?: { position: number; id: string }
+): Promise<{ tasks: Task[]; hasMore: boolean }> {
+  const rows = await prisma.task.findMany({
+    where: {
+      projectId,
+      columnId,
+      ...(cursor
+        ? {
+            OR: [
+              { position: { gt: cursor.position } },
+              { position: cursor.position, id: { gt: cursor.id } },
+            ],
+          }
+        : {}),
+    },
+    orderBy: [{ position: "asc" }, { id: "asc" }],
+    take: TASK_PAGE_SIZE + 1,
+    select: TASK_SUMMARY_SELECT,
+  });
+
+  return {
+    tasks: rows.slice(0, TASK_PAGE_SIZE) as unknown as Task[],
+    hasMore: rows.length > TASK_PAGE_SIZE,
+  };
+}
+
+export async function searchProjectTasks(projectId: string, searchTerm: string): Promise<Task[]> {
+  const term = searchTerm.trim();
+  if (!term) return [];
+
+  const tasks = await prisma.task.findMany({
+    where: {
+      projectId,
+      OR: [
+        { title: { contains: term, mode: "insensitive" } },
+        { taskKey: { contains: term, mode: "insensitive" } },
+        { description: { contains: term, mode: "insensitive" } },
+      ],
+    },
+    orderBy: [{ updatedAt: "desc" }, { id: "asc" }],
+    take: 30,
+    select: TASK_SUMMARY_SELECT,
+  });
+
+  return tasks as unknown as Task[];
 }
 
 export async function createProject(data: {
@@ -861,35 +922,13 @@ export async function createTask(data: {
           }
         }
 
-        // Determine the next sequential task key number by taking the maximum of existing tasks and current sequence counter
-        const existingTasks = await tx.task.findMany({
+        const sequence = await tx.taskSequence.upsert({
           where: { projectId: data.projectId },
-          select: { taskKey: true },
+          update: { current: { increment: 1 } },
+          create: { projectId: data.projectId, current: 1 },
         });
 
-        let highestNum = 0;
-        for (const t of existingTasks) {
-          const match = t.taskKey.match(/-(\d+)$/);
-          if (match) {
-            const n = parseInt(match[1], 10);
-            if (!isNaN(n) && n > highestNum) {
-              highestNum = n;
-            }
-          }
-        }
-
-        const existingSequence = await tx.taskSequence.findUnique({
-          where: { projectId: data.projectId },
-        });
-
-        const nextNum = Math.max(highestNum, existingSequence?.current || 0) + 1;
-
-        await tx.taskSequence.upsert({
-          where: { projectId: data.projectId },
-          update: { current: nextNum },
-          create: { projectId: data.projectId, current: nextNum },
-        });
-
+        const nextNum = sequence.current;
         const taskKey = `${project.key}-${nextNum}`;
 
         const lastTaskInColumn = await tx.task.findFirst({
@@ -972,6 +1011,8 @@ export async function updateTask(
     points?: number | null;
     dueDate?: string | null;
     columnId?: string;
+    assigneeIds?: string[];
+    labelIds?: string[];
   },
   actorId?: string
 ): Promise<Task | null> {
@@ -979,7 +1020,13 @@ export async function updateTask(
     return await prisma.$transaction(async (tx) => {
       const existing = await tx.task.findUnique({
         where: { id: taskId },
-        include: { project: true },
+        include: {
+          project: {
+            include: {
+              workspace: { select: { ownerId: true } },
+            },
+          },
+        },
       });
       if (!existing) return null;
 
@@ -1013,6 +1060,53 @@ export async function updateTask(
 
         if (!newStatus) {
           newStatus = mapColumnNameToStatus(destCol.name);
+        }
+      }
+
+      if (updates.assigneeIds !== undefined) {
+        const uniqueAssigneeIds = Array.from(new Set(updates.assigneeIds));
+        const members = await tx.workspaceMember.findMany({
+          where: {
+            workspaceId: existing.project.workspaceId,
+            userId: { in: uniqueAssigneeIds },
+          },
+          select: { userId: true },
+        });
+        const validAssigneeIds = new Set(members.map((member) => member.userId));
+        validAssigneeIds.add(existing.project.workspace.ownerId);
+        const invalidAssignee = uniqueAssigneeIds.find((id) => !validAssigneeIds.has(id));
+        if (invalidAssignee) {
+          throw new Error(`Assignee ${invalidAssignee} does not belong to this workspace.`);
+        }
+
+        await tx.taskAssignee.deleteMany({ where: { taskId } });
+        if (uniqueAssigneeIds.length > 0) {
+          await tx.taskAssignee.createMany({
+            data: uniqueAssigneeIds.map((userId) => ({ taskId, userId })),
+          });
+        }
+      }
+
+      if (updates.labelIds !== undefined) {
+        const uniqueLabelIds = Array.from(new Set(updates.labelIds));
+        const labels = await tx.label.findMany({
+          where: {
+            workspaceId: existing.project.workspaceId,
+            id: { in: uniqueLabelIds },
+          },
+          select: { id: true },
+        });
+        const validLabelIds = new Set(labels.map((label) => label.id));
+        const invalidLabel = uniqueLabelIds.find((id) => !validLabelIds.has(id));
+        if (invalidLabel) {
+          throw new Error(`Label ${invalidLabel} does not belong to this workspace.`);
+        }
+
+        await tx.taskLabel.deleteMany({ where: { taskId } });
+        if (uniqueLabelIds.length > 0) {
+          await tx.taskLabel.createMany({
+            data: uniqueLabelIds.map((labelId) => ({ taskId, labelId })),
+          });
         }
       }
 
@@ -1062,7 +1156,7 @@ export async function updateTask(
 export async function moveTask(
   taskId: string,
   destColumnId: string,
-  newPosition: number,
+  destinationIndex: number,
   actorId?: string
 ): Promise<Task | null> {
   try {
@@ -1082,13 +1176,48 @@ export async function moveTask(
         throw new Error("Destination column does not belong to the task's project.");
       }
 
+      if (!Number.isSafeInteger(destinationIndex) || destinationIndex < 0) {
+        throw new Error("Destination index must be a non-negative integer.");
+      }
+
+      const destinationTasks = await tx.task.findMany({
+        where: { columnId: destColumnId, id: { not: taskId } },
+        orderBy: [{ position: "asc" }, { id: "asc" }],
+        select: { id: true, position: true },
+      });
+      const insertionIndex = Math.min(destinationIndex, destinationTasks.length);
+      const before = destinationTasks[insertionIndex - 1];
+      const after = destinationTasks[insertionIndex];
+      let position =
+        before && after
+          ? before.position + (after.position - before.position) / 2
+          : before
+            ? before.position + 1000
+            : after
+              ? after.position - 1000
+              : 1000;
+
+      if (before && after && after.position - before.position < 0.000001) {
+        await Promise.all(
+          destinationTasks.map((destinationTask, index) =>
+            tx.task.update({
+              where: { id: destinationTask.id },
+              data: {
+                position: (index + (index < insertionIndex ? 1 : 2)) * 1000,
+              },
+            })
+          )
+        );
+        position = (insertionIndex + 1) * 1000;
+      }
+
       const newStatus = mapColumnNameToStatus(destCol.name);
 
       const updated = await tx.task.update({
         where: { id: taskId },
         data: {
           columnId: destColumnId,
-          position: newPosition,
+          position,
           status: newStatus,
         },
         include: {
@@ -1110,7 +1239,7 @@ export async function moveTask(
             taskId: updated.id,
             actorId,
             action: `moved task ${updated.taskKey}`,
-            details: JSON.stringify({ columnId: destColumnId, position: newPosition, status: newStatus }),
+            details: JSON.stringify({ columnId: destColumnId, position, status: newStatus }),
           },
         });
       }
@@ -2111,4 +2240,3 @@ export async function verifyEmailByToken(token: string) {
     },
   };
 }
-

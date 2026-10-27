@@ -8,6 +8,7 @@ import { PriorityBadge } from "@/components/ui/badge";
 export function CommandPalette({
   tasks,
   project,
+  onSearchTasks,
   onSelectTask,
   onSelectView,
   isOpen: externalIsOpen,
@@ -15,6 +16,7 @@ export function CommandPalette({
 }: {
   tasks: Task[];
   project: Project;
+  onSearchTasks: (query: string) => Promise<Task[]>;
   onSelectTask: (task: Task) => void;
   onSelectView: (view: "board" | "list" | "calendar" | "activity") => void;
   isOpen?: boolean;
@@ -32,6 +34,12 @@ export function CommandPalette({
     [externalOnClose, internalIsOpen]
   );
   const [query, setQuery] = useState("");
+  const [searchState, setSearchState] = useState<{
+    query: string;
+    tasks: Task[];
+    loading: boolean;
+    error: string | null;
+  } | null>(null);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -47,16 +55,57 @@ export function CommandPalette({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [setIsOpen]);
 
+  useEffect(() => {
+    const searchTerm = query.trim();
+    if (!isOpen || !searchTerm) return;
+
+    let isCurrent = true;
+    const timeout = setTimeout(() => {
+      setSearchState({ query: searchTerm, tasks: [], loading: true, error: null });
+      onSearchTasks(searchTerm)
+        .then((results) => {
+          if (isCurrent) {
+            setSearchState({ query: searchTerm, tasks: results, loading: false, error: null });
+          }
+        })
+        .catch((error: unknown) => {
+          if (isCurrent) {
+            console.error("[Command Palette Search Error]:", error);
+            setSearchState({
+              query: searchTerm,
+              tasks: [],
+              loading: false,
+              error: "Task search is temporarily unavailable.",
+            });
+          }
+        });
+    }, 200);
+
+    return () => {
+      isCurrent = false;
+      clearTimeout(timeout);
+    };
+  }, [isOpen, onSearchTasks, query]);
+
   const filteredTasks = useMemo(() => {
-    if (!query.trim()) return tasks.slice(0, 5);
-    const q = query.toLowerCase();
-    return tasks.filter(
+    const allTasks = new Map(tasks.map((task) => [task.id, task]));
+    const searchTerm = query.trim();
+    const currentSearchState = searchState?.query === searchTerm ? searchState : null;
+    if (searchTerm && currentSearchState) {
+      for (const task of currentSearchState.tasks) allTasks.set(task.id, task);
+    }
+    if (!searchTerm) return Array.from(allTasks.values()).slice(0, 5);
+    const q = searchTerm.toLowerCase();
+    return Array.from(allTasks.values()).filter(
       (t) =>
         t.title.toLowerCase().includes(q) ||
         t.taskKey.toLowerCase().includes(q) ||
         (t.description && t.description.toLowerCase().includes(q))
     );
-  }, [tasks, query]);
+  }, [tasks, searchState, query]);
+  const searchTerm = query.trim();
+  const currentSearchState = searchState?.query === searchTerm ? searchState : null;
+  const isSearching = Boolean(isOpen && searchTerm && (!currentSearchState || currentSearchState.loading));
 
   if (!isOpen) return null;
 
@@ -139,7 +188,11 @@ export function CommandPalette({
             <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-3 py-1">
               Tasks in {project.name}
             </p>
-            {filteredTasks.length === 0 ? (
+            {isSearching ? (
+              <div className="p-4 text-center text-xs text-slate-400">Searching tasks...</div>
+            ) : currentSearchState?.error ? (
+              <div className="p-4 text-center text-xs text-rose-500">{currentSearchState.error}</div>
+            ) : filteredTasks.length === 0 ? (
               <div className="p-4 text-center text-xs text-slate-400">
                 No matching tasks found for &quot;{query}&quot;
               </div>

@@ -17,6 +17,8 @@ const ALLOWED_UPDATE_FIELDS = new Set([
   "points",
   "dueDate",
   "columnId",
+  "assigneeIds",
+  "labelIds",
 ]);
 
 export async function GET(
@@ -114,6 +116,14 @@ export async function PATCH(
           return NextResponse.json({ error: "ColumnId must be a non-empty string" }, { status: 400 });
         }
         updates.columnId = value.trim();
+      } else if (key === "assigneeIds" || key === "labelIds") {
+        if (!Array.isArray(value) || value.some((id) => typeof id !== "string" || !id.trim())) {
+          return NextResponse.json(
+            { error: `${key} must be an array of non-empty string IDs` },
+            { status: 400 }
+          );
+        }
+        updates[key] = value as string[];
       }
     }
 
@@ -157,6 +167,8 @@ export async function PATCH(
     const isClientError =
       message.includes("does not belong to the task's project") ||
       message.includes("Column not found") ||
+      message.includes("Assignee") ||
+      message.includes("Label") ||
       message.includes("Invalid");
     return NextResponse.json({ error: message }, { status: isClientError ? 400 : 500 });
   }

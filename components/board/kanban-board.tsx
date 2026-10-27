@@ -9,6 +9,10 @@ import { isReadOnly } from "@/lib/rbac/permissions";
 export function KanbanBoard({
   columns,
   tasks,
+  taskCounts,
+  tasksByColumnHasMore,
+  loadingColumns,
+  onLoadMore,
   currentUser,
   onTaskClick,
   onTaskMove,
@@ -17,6 +21,10 @@ export function KanbanBoard({
 }: {
   columns: ColumnType[];
   tasks: Task[];
+  taskCounts?: Record<string, number>;
+  tasksByColumnHasMore?: Record<string, boolean>;
+  loadingColumns?: Set<string>;
+  onLoadMore?: (columnId: string) => void;
   currentUser: User;
   onTaskClick: (task: Task) => void;
   onTaskMove: (taskId: string, destColumnId: string, newPosition: number) => Promise<void>;
@@ -80,6 +88,10 @@ export function KanbanBoard({
                 key={column.id}
                 column={column}
                 tasks={columnTasks}
+                taskCount={taskCounts?.[column.id]}
+                hasMoreTasks={tasksByColumnHasMore?.[column.id]}
+                isLoadingMore={loadingColumns?.has(column.id)}
+                onLoadMore={() => onLoadMore?.(column.id)}
                 isDragDisabled={readOnly}
                 onTaskClick={onTaskClick}
                 onQuickAdd={onQuickAdd}

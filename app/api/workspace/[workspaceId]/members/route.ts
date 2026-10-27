@@ -163,6 +163,13 @@ export async function PATCH(
       return NextResponse.json({ error: "Member not found in workspace" }, { status: 404 });
     }
 
+    if (targetMember.role === "OWNER" && access.role !== "OWNER") {
+      return NextResponse.json(
+        { error: "Only workspace owners can change another owner's role" },
+        { status: 403 }
+      );
+    }
+
     if (targetMember.role === "OWNER" && role !== "OWNER") {
       const ownerCount = await prisma.workspaceMember.count({
         where: { workspaceId, role: "OWNER" },
@@ -212,6 +219,13 @@ export async function DELETE(
     });
     if (!targetMember) {
       return NextResponse.json({ error: "Member not found in workspace" }, { status: 404 });
+    }
+
+    if (targetMember.role === "OWNER" && access.role !== "OWNER") {
+      return NextResponse.json(
+        { error: "Only workspace owners can remove another owner" },
+        { status: 403 }
+      );
     }
 
     if (targetMember.role === "OWNER") {

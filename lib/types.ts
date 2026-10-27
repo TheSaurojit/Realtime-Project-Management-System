@@ -146,6 +146,7 @@ export interface BoardColumn {
   wipLimit?: number | null;
   color?: string | null;
   tasks: Task[];
+  _count?: { tasks: number };
 }
 
 export interface ProjectMember {

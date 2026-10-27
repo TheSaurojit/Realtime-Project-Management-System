@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse, after } from "next/server";
-import { createTask } from "@/lib/db";
+import { createTask, getProjectTasksPage, searchProjectTasks } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth/session";
 import { broadcastRealtimeEvent } from "@/lib/realtime/server";
 import { requireProjectWorkspaceAccess } from "@/lib/rbac/server";
@@ -7,6 +7,61 @@ import { TaskPriority } from "@/lib/types";
 import { sanitizeSensitiveFields } from "@/lib/utils";
 
 const VALID_PRIORITIES: TaskPriority[] = ["LOW", "MEDIUM", "HIGH", "URGENT"];
+
+export async function GET(request: NextRequest) {
+  try {
+    const user = await getCurrentUser();
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const { searchParams } = new URL(request.url);
+    const projectId = searchParams.get("projectId");
+    const searchTerm = searchParams.get("search");
+    const columnId = searchParams.get("columnId");
+    const afterPosition = searchParams.get("afterPosition");
+    const afterId = searchParams.get("afterId");
+
+    if (!projectId) {
+      return NextResponse.json({ error: "projectId is required" }, { status: 400 });
+    }
+    if (searchTerm !== null && (searchTerm.length > 100 || !searchTerm.trim())) {
+      return NextResponse.json({ error: "search must be between 1 and 100 characters" }, { status: 400 });
+    }
+
+    const access = await requireProjectWorkspaceAccess(user.id, projectId, "view");
+    if (!access) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    if (searchTerm !== null) {
+      return NextResponse.json({ tasks: await searchProjectTasks(projectId, searchTerm) });
+    }
+
+    if (!columnId) {
+      return NextResponse.json({ error: "columnId is required for task pagination" }, { status: 400 });
+    }
+
+    const hasPosition = afterPosition !== null;
+    const hasId = afterId !== null;
+    if (
+      hasPosition !== hasId ||
+      (hasPosition &&
+        (!afterPosition?.trim() || !Number.isFinite(Number(afterPosition)) || !afterId))
+    ) {
+      return NextResponse.json({ error: "Invalid pagination cursor" }, { status: 400 });
+    }
+
+    const page = await getProjectTasksPage(projectId, columnId, hasPosition
+      ? { position: Number(afterPosition), id: afterId! }
+      : undefined);
+
+    return NextResponse.json(page);
+  } catch (error) {
+    console.error("[API] Task page fetch failed:", error);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+  }
+}
 
 export async function POST(request: NextRequest) {
   try {

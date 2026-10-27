@@ -27,7 +27,11 @@ export function useRealtimeSubscription(
     if (typeof window === "undefined") return false;
     return getPusherClient()?.connection?.state === "connected";
   });
-  const transport: "pusher" | "sse" | "none" = process.env.NEXT_PUBLIC_PUSHER_KEY ? "pusher" : "sse";
+  const transport: "pusher" | "sse" | "unavailable" = process.env.NEXT_PUBLIC_PUSHER_KEY
+    ? "pusher"
+    : process.env.NODE_ENV === "production"
+      ? "unavailable"
+      : "sse";
   const onEventRef = useRef(onEvent);
   
   useEffect(() => {
@@ -35,7 +39,7 @@ export function useRealtimeSubscription(
   }, [onEvent]);
 
   useEffect(() => {
-    if (!channelName) return;
+    if (!channelName || transport === "unavailable") return;
 
     const pusher = getPusherClient();
 
@@ -98,7 +102,7 @@ export function useRealtimeSubscription(
         }
       };
     }
-  }, [channelName]);
+  }, [channelName, transport]);
 
   return { isConnected, transport };
 }

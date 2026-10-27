@@ -4,6 +4,7 @@ import { getCurrentUser } from "@/lib/auth/session";
 import { getEffectiveProjectAccess } from "@/lib/rbac/server";
 import { prisma } from "@/lib/prisma";
 import { ProjectClientView } from "@/components/project/project-client-view";
+import { Label } from "@/lib/types";
 
 export default async function ProjectPage({
   params,
@@ -38,6 +39,7 @@ export default async function ProjectPage({
         members: {
           include: { user: { select: SAFE_USER_SELECT } },
         },
+        labels: true,
       },
     }),
   ]);
@@ -53,6 +55,7 @@ export default async function ProjectPage({
       currentUser={currentUser}
       effectiveAccess={effectiveAccess}
       workspaceMembers={(workspace?.members || []) as unknown as Parameters<typeof ProjectClientView>[0]["workspaceMembers"]}
+      workspaceLabels={(workspace?.labels || []) as Label[]}
       notifications={notifications}
       activities={activities}
     />

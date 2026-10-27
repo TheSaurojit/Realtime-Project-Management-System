@@ -7,6 +7,13 @@ import { requireProjectWorkspaceAccess, requireWorkspaceAccess } from "@/lib/rba
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
+  if (process.env.NODE_ENV === "production") {
+    return Response.json(
+      { error: "SSE realtime is available only for single-process development. Configure Pusher for production." },
+      { status: 503 }
+    );
+  }
+
   // 1. Authenticate user
   const user = await getCurrentUser();
   if (!user) {

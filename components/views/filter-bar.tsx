@@ -19,6 +19,7 @@ export function FilterBar({
   labels,
   totalTasks,
   filteredCount,
+  searchError,
 }: {
   filters: FilterState;
   onChange: (filters: FilterState) => void;
@@ -26,6 +27,7 @@ export function FilterBar({
   labels: Label[];
   totalTasks: number;
   filteredCount: number;
+  searchError?: string;
 }) {
   const priorities: TaskPriority[] = ["URGENT", "HIGH", "MEDIUM", "LOW"];
 
@@ -66,6 +68,11 @@ export function FilterBar({
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-3 border-b border-slate-200 dark:border-slate-800 bg-white/40 dark:bg-slate-900/40">
       <div className="flex flex-wrap items-center gap-2">
+        {searchError && (
+          <p role="status" className="text-xs text-rose-600 dark:text-rose-400">
+            {searchError}
+          </p>
+        )}
         {/* Debounced Search input */}
         <div className="relative">
           <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />

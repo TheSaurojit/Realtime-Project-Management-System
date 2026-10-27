@@ -8,7 +8,7 @@ on:
 
 jobs:
   validate:
-    name: Lint, Typecheck & Test
+    name: Lint, Typecheck, Test & Build
     runs-on: ubuntu-latest
 
     services:
@@ -34,6 +34,10 @@ jobs:
       NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "mock-publishable-key-for-ci"
       SUPABASE_SECRET_KEY: "mock-secret-key-for-ci"
       SUPABASE_STORAGE_BUCKET: "attachments"
+      PUSHER_APP_ID: "ci-mock-pusher-app-id"
+      NEXT_PUBLIC_PUSHER_KEY: "ci-mock-pusher-key"
+      PUSHER_SECRET: "ci-mock-pusher-secret"
+      NEXT_PUBLIC_PUSHER_CLUSTER: "mt1"
       NODE_ENV: test
 
     steps:
@@ -60,3 +64,6 @@ jobs:
 
       - name: Run Test Suite
         run: npm test
+
+      - name: Build Application
+        run: npm run build

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useMemo, useRef } from "react";
+import { useState, useCallback, useMemo, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import {
   Project,
@@ -32,6 +32,7 @@ export function ProjectClientView({
   currentUser,
   effectiveAccess,
   workspaceMembers = [],
+  workspaceLabels = [],
   notifications,
   activities,
 }: {
@@ -45,6 +46,7 @@ export function ProjectClientView({
     workspaceId: string;
   };
   workspaceMembers?: { user: User; role: string; id: string; userId: string }[];
+  workspaceLabels?: Label[];
   notifications: Notification[];
   activities: ActivityLog[];
 }) {
@@ -53,16 +55,48 @@ export function ProjectClientView({
     ? effectiveAccess.accessLevel === "READ"
     : !currentUser.role || currentUser.role === "VIEWER";
   const [tasks, setTasks] = useState<Task[]>(initialTasks);
+  const knownTaskColumns = useRef(new Map(initialTasks.map((task) => [task.id, task.columnId])));
+  const [taskCounts, setTaskCounts] = useState<Record<string, number>>(
+    () => Object.fromEntries(
+      (project.columns || []).map((column) => [
+        column.id,
+        column._count?.tasks ?? column.tasks.length,
+      ])
+    )
+  );
+  const [searchState, setSearchState] = useState<{
+    query: string;
+    tasks: Task[];
+    error: boolean;
+  } | null>(null);
   const [columns] = useState<BoardColumn[]>(project.columns || []);
   const [currentView, setCurrentView] = useState<"board" | "list" | "calendar" | "activity">("board");
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
-  const [isLoadingTaskDetails, setIsLoadingTaskDetails] = useState(false);
+  const [loadingTaskId, setLoadingTaskId] = useState<string | null>(null);
   const taskDetailsCache = useRef<Map<string, Task>>(new Map());
+  const [tasksByColumnHasMore, setTasksByColumnHasMore] = useState<Record<string, boolean>>(
+    () => Object.fromEntries(
+      (project.columns || []).map((column) => [
+        column.id,
+        (column._count?.tasks ?? column.tasks.length) > column.tasks.length,
+      ])
+    )
+  );
+  const [loadingColumns, setLoadingColumns] = useState<Set<string>>(() => new Set());
+  const loadingColumnsRef = useRef(new Set<string>());
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
 
+  const updateTaskCount = useCallback((columnId: string, delta: number) => {
+    setTaskCounts((previous) => ({
+      ...previous,
+      [columnId]: Math.max(0, (previous[columnId] ?? 0) + delta),
+    }));
+  }, []);
+
   // Load task details on-demand when opening modal
   const handleOpenTaskDetail = useCallback(async (task: Task) => {
+    knownTaskColumns.current.set(task.id, task.columnId);
     // If task already has complete details loaded, display it immediately
     if (task.comments && task.attachments && task.description !== undefined) {
       setSelectedTask(task);
@@ -77,26 +111,81 @@ export function ProjectClientView({
 
     // Open modal immediately with available lightweight summary (0ms perceived lag)
     setSelectedTask(task);
-    setIsLoadingTaskDetails(true);
+    setLoadingTaskId(task.id);
 
     try {
       const res = await fetch(`/api/tasks/${task.id}`);
-      if (res.ok) {
-        const fullTask: Task = await res.json();
-        taskDetailsCache.current.set(task.id, fullTask);
-        setSelectedTask((current) => {
-          if (current && current.id === task.id) {
-            return fullTask;
-          }
-          return current;
-        });
+      if (!res.ok) {
+        throw new Error(`Task details request failed (${res.status})`);
       }
+      const fullTask: Task = await res.json();
+      taskDetailsCache.current.set(task.id, fullTask);
+      setTasks((previous) => previous.map((existing) => existing.id === fullTask.id ? fullTask : existing));
+      setSelectedTask((current) => current?.id === task.id ? fullTask : current);
     } catch (err) {
       console.error("[Task Details Fetch Error]:", err);
     } finally {
-      setIsLoadingTaskDetails(false);
+      setLoadingTaskId((current) => current === task.id ? null : current);
     }
   }, []);
+
+  const loadMoreTasks = useCallback(async (columnId: string) => {
+    if (loadingColumnsRef.current.has(columnId) || !tasksByColumnHasMore[columnId]) return;
+    loadingColumnsRef.current.add(columnId);
+    setLoadingColumns(new Set(loadingColumnsRef.current));
+
+    try {
+      const loadedInColumn = tasks
+        .filter((task) => task.columnId === columnId)
+        .sort((a, b) => a.position - b.position || a.id.localeCompare(b.id));
+      const lastTask = loadedInColumn[loadedInColumn.length - 1];
+      const query = new URLSearchParams({ projectId: project.id, columnId });
+      if (lastTask) {
+        query.set("afterPosition", String(lastTask.position));
+        query.set("afterId", lastTask.id);
+      }
+
+      const response = await fetch(`/api/tasks?${query.toString()}`);
+      if (!response.ok) {
+        throw new Error(`Loading project tasks failed (${response.status})`);
+      }
+      const page: { tasks: Task[]; hasMore: boolean } = await response.json();
+      for (const task of page.tasks) {
+        knownTaskColumns.current.set(task.id, task.columnId);
+      }
+      setTasks((previous) => {
+        const existingIds = new Set(previous.map((task) => task.id));
+        return [...previous, ...page.tasks.filter((task) => !existingIds.has(task.id))];
+      });
+      setTasksByColumnHasMore((previous) => ({ ...previous, [columnId]: page.hasMore }));
+    } catch (error) {
+      console.error("[Task Page Fetch Error]:", error);
+    } finally {
+      loadingColumnsRef.current.delete(columnId);
+      setLoadingColumns(new Set(loadingColumnsRef.current));
+    }
+  }, [project.id, tasks, tasksByColumnHasMore]);
+
+  const loadMoreTasksForCurrentView = useCallback(async () => {
+    await Promise.all(
+      Object.entries(tasksByColumnHasMore)
+        .filter(([, hasMore]) => hasMore)
+        .map(([columnId]) => loadMoreTasks(columnId))
+    );
+  }, [loadMoreTasks, tasksByColumnHasMore]);
+
+  const searchProjectTasks = useCallback(async (searchTerm: string): Promise<Task[]> => {
+    const query = new URLSearchParams({
+      projectId: project.id,
+      search: searchTerm,
+    });
+    const response = await fetch(`/api/tasks?${query.toString()}`);
+    if (!response.ok) {
+      throw new Error(`Task search failed (${response.status})`);
+    }
+    const result: { tasks: Task[] } = await response.json();
+    return result.tasks;
+  }, [project.id]);
 
   const [filters, setFilters] = useState<FilterState>({
     search: "",
@@ -105,10 +194,40 @@ export function ProjectClientView({
     labelId: null,
   });
 
+  useEffect(() => {
+    const searchTerm = filters.search.trim();
+    if (!searchTerm) return;
+
+    let isCurrent = true;
+    searchProjectTasks(searchTerm)
+      .then((results) => {
+        if (isCurrent) {
+          for (const task of results) {
+            knownTaskColumns.current.set(task.id, task.columnId);
+          }
+          setSearchState({ query: searchTerm, tasks: results, error: false });
+        }
+      })
+      .catch((error: unknown) => {
+        if (isCurrent) {
+          console.error("[Task Search Error]:", error);
+          setSearchState({ query: searchTerm, tasks: [], error: true });
+        }
+      });
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [filters.search, searchProjectTasks]);
+
   // Real-time updates subscription
   const handleRealtimeEvent = useCallback((event: RealtimeEvent) => {
     switch (event.type) {
       case "task:created": {
+        if (!knownTaskColumns.current.has(event.payload.task.id)) {
+          knownTaskColumns.current.set(event.payload.task.id, event.payload.task.columnId);
+          updateTaskCount(event.payload.task.columnId, 1);
+        }
         setTasks((prev) => {
           if (prev.some((t) => t.id === event.payload.task.id)) return prev;
           return [...prev, event.payload.task];
@@ -116,6 +235,7 @@ export function ProjectClientView({
         break;
       }
       case "task:updated": {
+        taskDetailsCache.current.set(event.payload.task.id, event.payload.task);
         setTasks((prev) =>
           prev.map((t) => {
             if (t.id !== event.payload.task.id) return t;
@@ -134,6 +254,12 @@ export function ProjectClientView({
       }
       case "task:moved": {
         const { taskId, destColumnId, newPosition } = event.payload;
+        const sourceColumnId = knownTaskColumns.current.get(taskId);
+        if (sourceColumnId && sourceColumnId !== destColumnId) {
+          knownTaskColumns.current.set(taskId, destColumnId);
+          updateTaskCount(sourceColumnId, -1);
+          updateTaskCount(destColumnId, 1);
+        }
         setTasks((prev) => {
           const task = prev.find((t) => t.id === taskId);
           if (!task) return prev;
@@ -149,6 +275,12 @@ export function ProjectClientView({
         break;
       }
       case "task:deleted": {
+        const deletedColumnId = knownTaskColumns.current.get(event.payload.taskId);
+        if (deletedColumnId) {
+          knownTaskColumns.current.delete(event.payload.taskId);
+          updateTaskCount(deletedColumnId, -1);
+        }
+        taskDetailsCache.current.delete(event.payload.taskId);
         setTasks((prev) => prev.filter((t) => t.id !== event.payload.taskId));
         setSelectedTask((prev) =>
           prev && prev.id === event.payload.taskId ? null : prev
@@ -184,7 +316,7 @@ export function ProjectClientView({
         break;
       }
     }
-  }, [project.id, router]);
+  }, [project.id, router, updateTaskCount]);
 
   const { isConnected, transport } = useRealtimeSubscription(
     `project-${project.id}`,
@@ -240,7 +372,20 @@ export function ProjectClientView({
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ destColumnId, newPosition }),
-        })
+        }),
+      (data) => {
+        const result = data as { task?: Task } | null;
+        if (!result?.task) return;
+        const movedTask = result.task;
+        const sourceColumnId = knownTaskColumns.current.get(taskId);
+        if (sourceColumnId && sourceColumnId !== movedTask.columnId) {
+          knownTaskColumns.current.set(taskId, movedTask.columnId);
+          updateTaskCount(sourceColumnId, -1);
+          updateTaskCount(movedTask.columnId, 1);
+        }
+        taskDetailsCache.current.delete(taskId);
+        setTasks((previous) => previous.map((task) => task.id === taskId ? movedTask : task));
+      }
     );
   };
 
@@ -250,17 +395,25 @@ export function ProjectClientView({
       setSelectedTask((prev) => (prev ? { ...prev, ...updates } : null));
     }
 
+    const { assignees, labels, ...taskFields } = updates;
+    const requestUpdates = {
+      ...taskFields,
+      ...(assignees !== undefined ? { assigneeIds: assignees.map(({ user }) => user.id) } : {}),
+      ...(labels !== undefined ? { labelIds: labels.map(({ label }) => label.id) } : {}),
+    };
+
     await mutateTask(
       (prev) => prev.map((t) => (t.id === taskId ? { ...t, ...updates } : t)),
       () =>
         fetch(`/api/tasks/${taskId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(updates),
+          body: JSON.stringify(requestUpdates),
         }),
       (data) => {
         const updatedTask = data as Task | null;
         if (updatedTask && updatedTask.id) {
+          taskDetailsCache.current.set(updatedTask.id, updatedTask);
           setTasks((prev) => prev.map((t) => (t.id === taskId ? updatedTask : t)));
           if (selectedTask && selectedTask.id === taskId) {
             setSelectedTask(updatedTask);
@@ -291,6 +444,10 @@ export function ProjectClientView({
       });
       if (res.ok) {
         const newTask = await res.json();
+        if (!knownTaskColumns.current.has(newTask.id)) {
+          knownTaskColumns.current.set(newTask.id, newTask.columnId);
+          updateTaskCount(newTask.columnId, 1);
+        }
         // Client deduplication
         setTasks((prev) => {
           if (prev.some((t) => t.id === newTask.id)) return prev;
@@ -323,9 +480,15 @@ export function ProjectClientView({
     }
     taskDetailsCache.current.delete(taskId);
 
+    const deletedColumnId = knownTaskColumns.current.get(taskId);
     await mutateTask(
       (prev) => prev.filter((t) => t.id !== taskId),
-      () => fetch(`/api/tasks/${taskId}`, { method: "DELETE" })
+      () => fetch(`/api/tasks/${taskId}`, { method: "DELETE" }),
+      () => {
+        if (!deletedColumnId) return;
+        knownTaskColumns.current.delete(taskId);
+        updateTaskCount(deletedColumnId, -1);
+      }
     );
   };
 
@@ -487,10 +650,16 @@ export function ProjectClientView({
 
   // Filter tasks
   const filteredTasks = useMemo(() => {
-    return tasks.filter((task) => {
+    const allTasks = new Map(tasks.map((task) => [task.id, task]));
+    const searchTerm = filters.search.trim();
+    if (searchTerm && searchState?.query === searchTerm) {
+      for (const task of searchState.tasks) allTasks.set(task.id, task);
+    }
+
+    return Array.from(allTasks.values()).filter((task) => {
       // Search
       if (filters.search) {
-        const q = filters.search.toLowerCase();
+        const q = searchTerm.toLowerCase();
         const match =
           task.title.toLowerCase().includes(q) ||
           task.taskKey.toLowerCase().includes(q) ||
@@ -521,11 +690,12 @@ export function ProjectClientView({
 
       return true;
     });
-  }, [tasks, filters]);
+  }, [tasks, searchState, filters]);
 
   const projectUsers: User[] = useMemo(() => {
     const userMap = new Map<string, User>();
     if (currentUser?.id) userMap.set(currentUser.id, currentUser);
+    workspaceMembers.forEach((member) => userMap.set(member.user.id, member.user));
     if (project.lead) userMap.set(project.lead.id, project.lead);
     tasks.forEach((t) => {
       if (t.reporter) userMap.set(t.reporter.id, t.reporter);
@@ -534,9 +704,10 @@ export function ProjectClientView({
       });
     });
     return Array.from(userMap.values());
-  }, [project, tasks, currentUser]);
+  }, [project, tasks, currentUser, workspaceMembers]);
 
   const projectLabels: Label[] = useMemo(() => {
+    if (workspaceLabels.length > 0) return workspaceLabels;
     const labelMap = new Map<string, Label>();
     tasks.forEach((t) => {
       t.labels?.forEach((l) => {
@@ -552,7 +723,7 @@ export function ProjectClientView({
       { id: "lbl-5", workspaceId: project.workspaceId, name: "Feature", color: "#8b5cf6" },
       { id: "lbl-6", workspaceId: project.workspaceId, name: "Security", color: "#f59e0b" },
     ];
-  }, [tasks, project.workspaceId]);
+  }, [tasks, project.workspaceId, workspaceLabels]);
 
   return (
     <div className="flex-1 flex flex-col h-screen overflow-hidden">
@@ -578,8 +749,13 @@ export function ProjectClientView({
           onChange={setFilters}
           users={projectUsers}
           labels={projectLabels}
-          totalTasks={tasks.length}
+          totalTasks={project._count?.tasks ?? tasks.length}
           filteredCount={filteredTasks.length}
+          searchError={
+            searchState?.query === filters.search.trim() && searchState.error
+              ? "Task search is temporarily unavailable."
+              : undefined
+          }
         />
       )}
 
@@ -589,8 +765,12 @@ export function ProjectClientView({
           <KanbanBoard
             columns={columns}
             tasks={filteredTasks}
+            tasksByColumnHasMore={tasksByColumnHasMore}
+            taskCounts={taskCounts}
+            loadingColumns={loadingColumns}
+            onLoadMore={loadMoreTasks}
             currentUser={currentUser}
-            onTaskClick={(t) => setSelectedTask(t)}
+            onTaskClick={handleOpenTaskDetail}
             onTaskMove={handleTaskMove}
             onQuickAdd={handleQuickAdd}
             readOnly={isReadOnlyMode}
@@ -602,7 +782,7 @@ export function ProjectClientView({
             columns={columns}
             tasks={filteredTasks}
             currentUser={currentUser}
-            onTaskClick={(t) => setSelectedTask(t)}
+            onTaskClick={handleOpenTaskDetail}
             onUpdateTask={handleUpdateTask}
             readOnly={isReadOnlyMode}
           />
@@ -611,7 +791,7 @@ export function ProjectClientView({
         {currentView === "calendar" && (
           <CalendarView
             tasks={filteredTasks}
-            onTaskClick={(t) => setSelectedTask(t)}
+            onTaskClick={handleOpenTaskDetail}
           />
         )}
 
@@ -620,10 +800,23 @@ export function ProjectClientView({
             activities={activities}
             onTaskClick={(taskId) => {
               const target = tasks.find((t) => t.id === taskId);
-              if (target) setSelectedTask(target);
+              if (target) handleOpenTaskDetail(target);
             }}
           />
         )}
+        {currentView !== "board" && currentView !== "activity" &&
+          Object.values(tasksByColumnHasMore).some(Boolean) && (
+            <div className="flex justify-center border-t border-slate-200 dark:border-slate-800 p-3">
+              <button
+                type="button"
+                onClick={loadMoreTasksForCurrentView}
+                disabled={loadingColumns.size > 0}
+                className="rounded-lg border border-slate-300 dark:border-slate-700 px-4 py-2 text-sm text-slate-700 dark:text-slate-300 disabled:opacity-50"
+              >
+                {loadingColumns.size > 0 ? "Loading tasks..." : "Load more tasks"}
+              </button>
+            </div>
+          )}
       </main>
 
       {/* Task Detail Modal */}
@@ -643,6 +836,7 @@ export function ProjectClientView({
         users={projectUsers}
         labels={projectLabels}
         readOnly={isReadOnlyMode}
+        isLoadingDetails={Boolean(selectedTask && loadingTaskId === selectedTask.id)}
       />
 
       {/* Create Task Modal */}
@@ -660,7 +854,8 @@ export function ProjectClientView({
       <CommandPalette
         tasks={tasks}
         project={project}
-        onSelectTask={(t) => setSelectedTask(t)}
+        onSearchTasks={searchProjectTasks}
+        onSelectTask={handleOpenTaskDetail}
         onSelectView={setCurrentView}
         isOpen={isSearchOpen}
         onClose={() => setIsSearchOpen(false)}

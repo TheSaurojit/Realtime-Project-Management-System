@@ -10,12 +10,20 @@ import { Button } from "@/components/ui/button";
 export const BoardColumn = memo(function BoardColumn({
   column,
   tasks,
+  taskCount,
+  hasMoreTasks = false,
+  isLoadingMore = false,
+  onLoadMore,
   isDragDisabled,
   onTaskClick,
   onQuickAdd,
 }: {
   column: ColumnType;
   tasks: Task[];
+  taskCount?: number;
+  hasMoreTasks?: boolean;
+  isLoadingMore?: boolean;
+  onLoadMore?: () => void;
   isDragDisabled?: boolean;
   onTaskClick: (task: Task) => void;
   onQuickAdd: (columnId: string, title: string) => Promise<void>;
@@ -37,9 +45,10 @@ export const BoardColumn = memo(function BoardColumn({
     }
   };
 
+  const totalTaskCount = taskCount ?? column._count?.tasks ?? tasks.length;
   const isWipExceeded =
     Boolean(column.wipLimit && column.wipLimit > 0) &&
-    tasks.length > (column.wipLimit || 0);
+    totalTaskCount > (column.wipLimit || 0);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -74,7 +83,7 @@ export const BoardColumn = memo(function BoardColumn({
                 : "bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400"
             }`}
           >
-            {tasks.length}
+            {totalTaskCount}
             {column.wipLimit ? ` / ${column.wipLimit}` : ""}
           </span>
         </div>
@@ -138,6 +147,17 @@ export const BoardColumn = memo(function BoardColumn({
                   Showing {visibleCount} of {tasks.length} cards
                 </p>
               </div>
+            )}
+
+            {tasks.length <= visibleCount && hasMoreTasks && (
+              <button
+                type="button"
+                onClick={onLoadMore}
+                disabled={isLoadingMore}
+                className="w-full py-1.5 px-3 rounded-xl border border-slate-300 dark:border-slate-700 hover:bg-slate-200/60 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400 text-xs font-medium transition-colors disabled:opacity-50"
+              >
+                {isLoadingMore ? "Loading..." : "Load 30 more"}
+              </button>
             )}
 
             {/* Inline Add Task Form */}

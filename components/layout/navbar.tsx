@@ -55,6 +55,12 @@ export function Navbar({
 }) {
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [isMembersModalOpen, setIsMembersModalOpen] = useState(false);
+  const isRealtimeUnavailable = realtimeTransport === "unavailable";
+  const realtimeBadgeClass = isRealtimeUnavailable
+    ? "bg-amber-50 dark:bg-amber-950/40 border-amber-200 dark:border-amber-800/60 text-amber-700 dark:text-amber-300"
+    : isRealtimeConnected
+      ? "bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800/60 text-emerald-700 dark:text-emerald-300"
+      : "bg-slate-50 dark:bg-slate-900/40 border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400";
 
   const canCreate = effectiveAccess
     ? effectiveAccess.accessLevel !== "READ"
@@ -156,17 +162,29 @@ export function Navbar({
 
         {/* Real-time Status Badge */}
         <div
-          className="flex items-center gap-1.5 px-2 py-1 rounded-full text-[11px] font-medium border bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800/60 text-emerald-700 dark:text-emerald-300"
-          title={`Real-Time Engine: ${realtimeTransport.toUpperCase()} connected`}
+          className={`flex items-center gap-1.5 px-2 py-1 rounded-full text-[11px] font-medium border ${realtimeBadgeClass}`}
+          title={`Real-Time Engine: ${realtimeTransport.toUpperCase()}${isRealtimeConnected ? " connected" : " disconnected"}`}
         >
           <span className="relative flex h-2 w-2">
             {isRealtimeConnected && (
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
             )}
-            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+            <span
+              className={`relative inline-flex rounded-full h-2 w-2 ${
+                isRealtimeUnavailable
+                  ? "bg-amber-500"
+                  : isRealtimeConnected
+                    ? "bg-emerald-500"
+                    : "bg-slate-400"
+              }`}
+            ></span>
           </span>
           <span className="hidden md:inline font-mono uppercase text-[10px]">
-            {realtimeTransport === "pusher" ? "Pusher Live" : "SSE Live"}
+            {realtimeTransport === "pusher"
+              ? "Pusher Live"
+              : realtimeTransport === "sse"
+                ? "SSE Live"
+                : "Realtime Unavailable"}
           </span>
         </div>
 

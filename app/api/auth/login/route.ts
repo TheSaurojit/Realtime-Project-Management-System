@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { findUserByEmail } from "@/lib/db";
 import { createSessionToken, setSessionCookie } from "@/lib/auth/session";
+import { getSafeInternalRedirect } from "@/lib/auth/redirect";
 
 export async function POST(request: NextRequest) {
   try {
@@ -57,9 +58,7 @@ export async function POST(request: NextRequest) {
       ? `/workspace/${user.workspaceSlug}/project/${user.projectKey || "KAN"}`
       : `/workspaces`;
 
-    const redirectUrl = redirect && typeof redirect === "string" && redirect.startsWith("/")
-      ? redirect
-      : fallbackUrl;
+    const redirectUrl = getSafeInternalRedirect(redirect, fallbackUrl);
 
     return NextResponse.json({
       success: true,

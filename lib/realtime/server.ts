@@ -2,7 +2,7 @@ import Pusher from "pusher";
 import { EventEmitter } from "events";
 import { RealtimeEvent } from "@/lib/types";
 
-// In-memory event bus for local SSE subscribers
+// In-memory event bus is only used by the single-process development SSE fallback.
 class RealtimeBus extends EventEmitter {}
 const globalRealtimeBus = globalThis as unknown as {
   realtimeBus: RealtimeBus | undefined;
@@ -14,27 +14,30 @@ if (process.env.NODE_ENV !== "production") {
   globalRealtimeBus.realtimeBus = realtimeBus;
 }
 
-// Optional Pusher Server instance
+// Pusher is required in production and optional during local development.
 let pusherServerInstance: Pusher | null = null;
 export function getPusherServer(): Pusher | null {
   if (pusherServerInstance) return pusherServerInstance;
-  if (
-    process.env.PUSHER_APP_ID &&
-    process.env.NEXT_PUBLIC_PUSHER_KEY &&
-    process.env.PUSHER_SECRET
-  ) {
-    try {
-      pusherServerInstance = new Pusher({
-        appId: process.env.PUSHER_APP_ID,
-        key: process.env.NEXT_PUBLIC_PUSHER_KEY,
-        secret: process.env.PUSHER_SECRET,
-        cluster: process.env.NEXT_PUBLIC_PUSHER_CLUSTER || "mt1",
-        useTLS: true,
-      });
-    } catch (err) {
-      console.warn("[Realtime] Pusher init error:", err);
+
+  const appId = process.env.PUSHER_APP_ID?.trim();
+  const key = process.env.NEXT_PUBLIC_PUSHER_KEY?.trim();
+  const secret = process.env.PUSHER_SECRET?.trim();
+  if (!appId || !key || !secret) {
+    if (process.env.NODE_ENV === "production") {
+      throw new Error(
+        "Production realtime requires PUSHER_APP_ID, NEXT_PUBLIC_PUSHER_KEY, and PUSHER_SECRET."
+      );
     }
+    return null;
   }
+
+  pusherServerInstance = new Pusher({
+    appId,
+    key,
+    secret,
+    cluster: process.env.NEXT_PUBLIC_PUSHER_CLUSTER || "mt1",
+    useTLS: true,
+  });
   return pusherServerInstance;
 }
 
@@ -42,10 +45,12 @@ export async function broadcastRealtimeEvent(
   channel: string,
   event: RealtimeEvent
 ): Promise<void> {
-  // 1. Emit ONLY to tenant-specific channel (dropped global broadcast to prevent cross-tenant data leaks)
-  realtimeBus.emit(channel, event);
+  if (process.env.NODE_ENV !== "production") {
+    // Emit only to tenant-specific channels for local SSE subscribers.
+    realtimeBus.emit(channel, event);
+  }
 
-  // 2. Trigger Pusher private channel if configured
+  // Production must publish through the shared provider so events reach every instance.
   const pusher = getPusherServer();
   if (pusher) {
     try {
@@ -54,6 +59,9 @@ export async function broadcastRealtimeEvent(
       await pusher.trigger(privateChannel, event.type, event.payload);
     } catch (err) {
       console.warn("[Realtime] Pusher dispatch error:", err);
+      if (process.env.NODE_ENV === "production") {
+        throw err;
+      }
     }
   }
 }
